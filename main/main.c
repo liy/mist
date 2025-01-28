@@ -1,134 +1,87 @@
 #include <stdio.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/i2c.h"
+#include "driver/i2c_types.h"
 #include "esp_log.h"
-#include "esp_err.h"
+#include "esp_system.h"
+#include "sdkconfig.h"
+#include "sht4x.h"
 
-#define I2C_MASTER_SCL_IO 22       // GPIO for SCL
-#define I2C_MASTER_SDA_IO 21       // GPIO for SDA
-#define I2C_MASTER_NUM I2C_NUM_0   // I2C port number
-#define I2C_MASTER_FREQ_HZ 100000 // Frequency of I2C clock
-#define SHT4X_ADDR 0x44            // I2C address of SHT4x sensor
-#define SHT4X_CMD_MEASURE_HIGH 0xFD // Command to measure T and RH with high repeatability
-#define TAG "MIST_POT"
 
-typedef enum {
-    SENSOR_DISCONNECTED,
-    SENSOR_CONNECTED
-} sensor_state_t;
+#define SHT4X_SDA_GPIO      CONFIG_SHT4X_I2C_SDA  /*!< gpio number for I2C master data  */
+#define SHT4X_SCL_GPIO      CONFIG_SHT4X_I2C_SCL  /*!< gpio number for I2C master clock */
+#define I2C_PORT CONFIG_SHT4X_I2C_NUM   // I2C port number
+#define I2C_MASTER_FREQ_HZ CONFIG_SHT4X_I2C_CLK_SPEED_HZ // Frequency of I2C clock
 
-sensor_state_t sensor_state = SENSOR_DISCONNECTED;
+static const char *TAG = "Mist";
 
-// Initialize I2C
-static esp_err_t i2c_master_init(void) {
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+
+static esp_err_t i2c_bus_init(i2c_master_bus_handle_t *bus_handle, uint8_t sda_io, uint8_t scl_io)
+{
+    i2c_master_bus_config_t i2c_bus_config = {
+        .i2c_port = I2C_PORT,
+        .sda_io_num = sda_io,
+        .scl_io_num = scl_io,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
     };
-    esp_err_t ret = i2c_param_config(I2C_MASTER_NUM, &conf);
-    if (ret != ESP_OK) return ret;
-    return i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
-}
 
-// Check if the sensor is connected
-static esp_err_t check_sensor_connection(void) {
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (SHT4X_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_stop(cmd);
-    esp_err_t ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(100));
-    i2c_cmd_link_delete(cmd);
-    return ret;
-}
-
-// Read temperature and humidity from SHT4x
-static esp_err_t read_sensor_data(float *temperature, float *humidity) {
-    uint8_t data[6];
-    esp_err_t ret;
-
-    // Send the measurement command
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (SHT4X_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, SHT4X_CMD_MEASURE_HIGH, true);
-    i2c_master_stop(cmd);
-    ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(1000));
-    i2c_cmd_link_delete(cmd);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to send measurement command: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // Wait for the measurement to complete
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    // Read the measurement data
-    cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (SHT4X_ADDR << 1) | I2C_MASTER_READ, true);
-    i2c_master_read(cmd, data, 6, I2C_MASTER_LAST_NACK);
-    i2c_master_stop(cmd);
-    ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(1000));
-    i2c_cmd_link_delete(cmd);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read sensor data: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // Convert raw data to temperature and humidity
-    uint16_t raw_temp = (data[0] << 8) | data[1];
-    uint16_t raw_humidity = (data[3] << 8) | data[4];
-
-    *temperature = -45.0f + 175.0f * ((float)raw_temp / 65535.0f);
-    *humidity = 100.0f * ((float)raw_humidity / 65535.0f);
-
-    ESP_LOGI(TAG, "Temperature: %.2f °C, Humidity: %.2f %%", *temperature, *humidity);
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_config, bus_handle));
+    ESP_LOGI(TAG, "I2C master bus created");
 
     return ESP_OK;
 }
 
 // Task to monitor sensor connection
-void sensor_monitor_task(void *param) {
+static esp_err_t wait_connection(i2c_master_bus_handle_t *bus_handle) {
+    // Probe the sensor to check if it is connected to the bus with a timeout
+    while (i2c_master_probe(*bus_handle, SHT4X_I2C_ADDR_0, 200) != ESP_OK) {
+        ESP_LOGI(TAG, "SHT4X sensor not found");
+        vTaskDelay(pdMS_TO_TICKS(10000));
+    }
+
+    return ESP_OK;
+}
+
+
+static void sht4x_read_task(void *pvParameters)
+{
+    float temperature, humidity;
+
     while (1) {
-        esp_err_t ret = check_sensor_connection();
-        if (ret == ESP_OK) {
-            if (sensor_state == SENSOR_DISCONNECTED) {
-                ESP_LOGI(TAG, "Sensor connected!");
-                sensor_state = SENSOR_CONNECTED;
-            }
+        i2c_master_dev_handle_t sht4x_handle = (i2c_master_dev_handle_t) pvParameters;
+        esp_err_t err = sht4x_start_measurement(sht4x_handle, SHT4X_CMD_READ_MEASUREMENT_HIGH);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        err = sht4x_read_measurement(sht4x_handle, &temperature, &humidity);
+
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Temperature: %.2f C, Humidity: %.2f %%", temperature, humidity);
         } else {
-            if (sensor_state == SENSOR_CONNECTED) {
-                ESP_LOGW(TAG, "Sensor disconnected!");
-                sensor_state = SENSOR_DISCONNECTED;
-            }
+            ESP_LOGE(TAG, "Failed to read temperature and humidity");
         }
-        vTaskDelay(pdMS_TO_TICKS(sensor_state == SENSOR_CONNECTED ? 2000 : 10000));
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
-// Main application
-void app_main(void) {
-    ESP_ERROR_CHECK(i2c_master_init());
-    ESP_LOGI(TAG, "I2C initialized successfully");
+void app_main(void)
+{
+    i2c_master_bus_handle_t bus_handle = NULL;
+    i2c_bus_init(&bus_handle, SHT4X_SDA_GPIO, SHT4X_SCL_GPIO);
 
-    // Start sensor monitor task
-    xTaskCreate(sensor_monitor_task, "sensor_monitor_task", 2048, NULL, 10, NULL);
+    if(bus_handle != NULL) {
+        i2c_master_dev_handle_t sht4x_handle = sht4x_device_create(bus_handle, SHT4X_I2C_ADDR_0, I2C_MASTER_FREQ_HZ);
+        ESP_LOGI(TAG, "Sensor initialization success");
 
-    while (1) {
-        if (sensor_state == SENSOR_CONNECTED) {
-            float temperature = 0.0f, humidity = 0.0f;
-            esp_err_t ret = read_sensor_data(&temperature, &humidity);
-            if (ret != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to read sensor data");
-            }
-        } else {
-            ESP_LOGI(TAG, "Waiting for sensor...");
-        }
-        vTaskDelay(pdMS_TO_TICKS(5000)); // Main task delay
+        // Check if the sensor is connected
+        wait_connection(&bus_handle);
+
+        ESP_LOGI(TAG, "SHT4X sensor found");
+        xTaskCreate(sht4x_read_task, "sht4x_read_task", 4096, sht4x_handle, 5, NULL);
+    }
+    else {
+        ESP_LOGE(TAG, "Failed to initialize I2C bus");
     }
 }

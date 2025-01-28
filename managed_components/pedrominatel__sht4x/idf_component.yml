@@ -1,0 +1,19 @@
+dependencies:
+  idf: '>=5.3'
+description: SHT4X temperature and humidity sensor for the ESP-IDF
+issues: https://github.com/pedrominatel/esp-components/issues
+maintainers:
+- Pedro Minatel <pminatel@gmail.com>
+repository: git://github.com/pedrominatel/esp-components.git
+repository_info:
+  commit_sha: da0c78b17d4dd3f77a8e15099305a75d64e6fb27
+  path: sht4x
+tags:
+- sht4x
+- sensor
+- temperature
+- humidity
+- i2c
+- driver
+url: https://github.com/pedrominatel/esp-components/
+version: 0.1.1

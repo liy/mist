@@ -18,11 +18,8 @@ CMakeCache.txt
 cmake_install.cmake
 Makefile
 
-# Configuration files
-sdkconfig
-sdkconfig.ci
+# Backup sdk configuration files
 sdkconfig.old
-sdkconfig.defaults
 
 # Python environment files
 venv/
