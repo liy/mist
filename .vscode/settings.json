@@ -2,7 +2,7 @@
   "C_Cpp.intelliSenseEngine": "default",
   "idf.espIdfPath": "/Users/liy/esp/esp-idf",
   "idf.openOcdConfigs": ["board/esp32c6-builtin.cfg"],
-  "idf.port": "/dev/tty.usbmodem101",
+  "idf.port": "/dev/tty.usbmodem1101",
   "idf.toolsPath": "/Users/liy/.espressif",
   "idf.flashType": "UART"
 }

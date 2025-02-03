@@ -1,4 +1,4 @@
-idf_component_register(SRCS "main.c"
-                    PRIV_REQUIRES spi_flash
-                    INCLUDE_DIRS ""
-                    REQUIRES driver)
+idf_component_register(SRCS "espnow.c" 
+                            "main.c"
+                    PRIV_REQUIRES nvs_flash esp_event esp_netif esp_wifi
+                    INCLUDE_DIRS ".")
