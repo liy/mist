@@ -1,0 +1,11 @@
+syntax = "proto2";
+
+message SensorReading {
+  required int64 timestamp = 1;
+  optional float mist_temperature = 2;
+  optional float mist_humidity = 3;
+  optional float air_temperature = 4;
+  optional float air_humidity = 5;
+  optional float air_pressure = 6;
+  optional uint64 light_intensity = 7;
+}

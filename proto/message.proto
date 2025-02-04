@@ -1,5 +1,0 @@
-syntax = "proto2";
-
-message MyMessage {
-  required string content = 1;
-}
