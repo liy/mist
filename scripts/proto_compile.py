@@ -46,10 +46,9 @@ def generate_nanopb_files():
         proto_c_output = PROTO_OUTPUT_PATH / f"{proto_file_name}.pb.c"
         proto_h_output = PROTO_OUTPUT_PATH / f"{proto_file_name}.pb.h"
         
-        if not proto_c_output.exists() or not proto_h_output.exists():
-            print(f"Generating {proto_file_name}.pb.c and {proto_file_name}.pb.h from {proto_file}")
-            subprocess.run([str(VENV_PATH / "bin" / "python3"), str(GENERATOR_PATH / "nanopb_generator.py"),
-                            f"-I{PROTO_PATH}", f"-D{PROTO_OUTPUT_PATH}", str(proto_file)], check=True)
+        print(f"Generating {proto_file_name}.pb.c and {proto_file_name}.pb.h from {proto_file}")
+        subprocess.run([str(VENV_PATH / "bin" / "python3"), str(GENERATOR_PATH / "nanopb_generator.py"),
+                        f"-I{PROTO_PATH}", f"-D{PROTO_OUTPUT_PATH}", str(proto_file)], check=True)
 
 # Call the function to generate files
 generate_nanopb_files()

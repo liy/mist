@@ -167,7 +167,7 @@ typedef struct {
     size_t buffer_size;
 } task_t;
 
-static task_t* create_task(msg_header_t *msg, uint8_t mac_addr[ESP_NOW_ETH_ALEN]);
+task_t* create_task(msg_header_t *msg, uint8_t mac_addr[ESP_NOW_ETH_ALEN]);
 
 // Forward declaration of init_queue
 esp_err_t espnow_init(void);

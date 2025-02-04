@@ -31,11 +31,9 @@ for proto_file in "$PROTO_PATH"/*.proto; do
         proto_c_output="$PROTO_OUTPUT_PATH/$proto_file_name.pb.c"
         proto_h_output="$PROTO_OUTPUT_PATH/$proto_file_name.pb.h"
         
-        # Generate .c and .h files if they don't exist
-        if [ ! -f "$proto_c_output" ] || [ ! -f "$proto_h_output" ]; then
-            echo "Generating $proto_file_name.pb.c and $proto_file_name.pb.h from $proto_file..."
-            "$VENV_PATH/bin/python3" "$GENERATOR_PATH/nanopb_generator.py" -I"$PROTO_PATH" -D"$PROTO_OUTPUT_PATH" "$proto_file"
-        fi
+        # Generate .c and .h files
+        echo "Generating $proto_file_name.pb.c and $proto_file_name.pb.h from $proto_file..."
+        "$VENV_PATH/bin/python3" "$GENERATOR_PATH/nanopb_generator.py" -I"$PROTO_PATH" -D"$PROTO_OUTPUT_PATH" "$proto_file"
     fi
 done
 

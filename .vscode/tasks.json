@@ -2,14 +2,13 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Run Proto Compile",
+      "label": "Proto",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/proto_compile.sh",
       "group": {
         "kind": "build",
         "isDefault": true
       },
-      "problemMatcher": [],
       "detail": "This task runs the proto_compile.sh script to compile .proto files."
     }
   ]
