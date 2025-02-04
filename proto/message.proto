@@ -3,4 +3,5 @@ syntax = "proto2";
 message MyMessage {
   required int32 id = 1;
   optional string content = 2;
+  optional string abc = 3;
 }
