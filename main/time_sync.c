@@ -1,12 +1,15 @@
 #include "esp_sntp.h"
+#include "esp_log.h"
+
+static const char *TAG = "time_sync";
 
 /* Initialize SNTP client */
-void sntp_init(void)
+void time_sync(void)
 {
     ESP_LOGI(TAG, "Initializing SNTP");
-    sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    sntp_setservername(0, "pool.ntp.org");
-    sntp_init();
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_init();
 
     // Wait for time synchronization
     int retry = 0;

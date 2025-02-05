@@ -3,105 +3,15 @@
 #include "pb_decode.h"
 #include "messages.pb.h"
 #include <time.h>
-#include "esp_sntp.h"
-#include "esp_wifi.h"
-#include "esp_event.h"
+#include "wifi.h"
+#include "time_sync.h"
+
+#define WIFI_SSID      "lijilin_2.4G"
+#define WIFI_PASS      "lijilinlijilin"
 
 static const char *TAG = "Mist";
 
-// Configure your WiFi credentials here
-#define WIFI_SSID      "lijilin_2.4G"
-#define WIFI_PASS      "lijilinlijilin"
-#define MAX_RETRIES    5
-
-static EventGroupHandle_t wifi_event_group;
-const int WIFI_CONNECTED_BIT = BIT0;
-static int retry_count = 0;
-
-/* Event handler for WiFi events */
-static void wifi_event_handler(void* arg, esp_event_base_t event_base, 
-                             int32_t event_id, void* event_data)
-{
-    if (event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (retry_count < MAX_RETRIES) {
-            esp_wifi_connect();
-            retry_count++;
-            ESP_LOGI(TAG, "Retrying WiFi connection (%d/%d)", retry_count, MAX_RETRIES);
-        } else {
-            ESP_LOGE(TAG, "Failed to connect to WiFi");
-            xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
-        }
-    } else if (event_id == IP_EVENT_STA_GOT_IP) {
-        retry_count = 0;
-        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
-    }
-}
-
-/* Initialize WiFi station */
-static void wifi_init_sta(void)
-{
-    wifi_event_group = xEventGroupCreate();
-
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        &instance_got_ip));
-
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = WIFI_SSID,
-            .password = WIFI_PASS,
-            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-        },
-    };
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "WiFi initialization finished");
-}
-
-/* Initialize SNTP client */
-static void initialize_sntp(void)
-{
-    ESP_LOGI(TAG, "Initializing SNTP");
-    sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    sntp_setservername(0, "pool.ntp.org");
-    sntp_init();
-
-    // Wait for time synchronization
-    int retry = 0;
-    const int retry_count = 15;
-    while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < retry_count) {
-        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-    }
-}
-
-void app_main(void)
-{
-    // Initialize ESPNOW
-    // espnow_init();
-
-
+void nvs_init() {
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -109,14 +19,21 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+}
 
-    // Connect to WiFi
-    wifi_init_sta();
+void app_main(void)
+{
+    // Initialize NVS for wifi station mode
+    nvs_init();
+    // Init WiFi to station mode in order to sync time
+    wifi_sta_init(WIFI_SSID, WIFI_PASS);
+    // Sync time
+    time_sync();
+    // Deinit WiFi
+    wifi_shutdown();
+    // Swith WiFi to ESPNOW mode
+    wifi_espnow_init();
 
-    // Initialize SNTP
-    initialize_sntp();
-
-    
     // Get current time
     time_t now;
     time(&now);
@@ -166,4 +83,8 @@ void app_main(void)
     if (decoded_mist_sensor.has_humidity) {
         printf("Humidity: %.2f\n", decoded_mist_sensor.humidity);
     }
+
+
+    // Initialize ESPNOW
+    // espnow_init();
 }

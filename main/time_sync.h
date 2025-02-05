@@ -1,3 +1,3 @@
 #pragma once
 
-void sntp_init(void);
+void time_sync(void);
