@@ -1,0 +1,28 @@
+syntax = "proto2";
+
+message MistSensor {
+  required bool is_res = 1;
+  required int64 timestamp = 2;
+  optional float temperature = 3;
+  optional float humidity = 4;
+}
+
+message AirSensor {
+  required bool is_res = 1;
+  required int64 timestamp = 2;
+  optional float temperature = 3;
+  optional float humidity = 4;
+  optional float pressure = 5;
+}
+
+message LightSensor {
+  required bool is_res = 1;
+  required int64 timestamp = 2;
+  optional uint64 intensity = 3;
+}
+
+message TimeSync {
+  required bool is_res = 1;
+  required int64 req_timestamp = 2;
+  optional int64 res_timestamp = 3;
+}
