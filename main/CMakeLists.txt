@@ -1,5 +1,5 @@
 # Collect all .c files in the main directory
-file(GLOB MAIN_SRCS "main.c" "*.c")
+file(GLOB MAIN_SRCS "comm.c" "main.c" "*.c")
 
 # Collect all .c files in the proto_generated directory
 file(GLOB PROTO_SRCS "../proto_generated/*.c")

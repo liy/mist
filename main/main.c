@@ -73,113 +73,53 @@ static void handle_command(const Command* cmd) {
 bool task_handler(const task_t* task) {
     pb_istream_t stream = pb_istream_from_buffer(task->buffer, task->buffer_size);
     
-    MessageType message_type;
-    if (!pb_decode_varint(&stream, (uint64_t*)&message_type)) {
+    // In Protocol Buffers, each field is prefixed with a tag that contains two pieces of information:
+    //      1. The field number from your .proto file
+    //      2. The wire type (encoding type)
+    // It is encoded as the first byte, the tag: (field_number << 3) | wire_type
+    uint32_t tag;
+    if (!pb_decode_varint32(&stream, &tag)) {
         ESP_LOGE(TAG, "Failed to decode message type");
-        return true;
+        return false; // or handle error
     }
+
+    // Decode the actual message type
+    MessageType message_type;
+    if (!pb_decode_varint32(&stream, (uint32_t*)&message_type)) {
+        return false; // or handle error
+    }
+
+    // In order to decode the message using the correct message type, we need to reset the stream. 
+    // Reset stream to beginning, by setting the bytes_left to the total buffer size 
+    stream.bytes_left = task->buffer_size;
+    // and setting pointer to the beginning of the buffer
+    stream.state = (void*)task->buffer;
 
     switch (message_type) {
         case MessageType_SENSOR_QUERY: {
             SensorQuery query = SensorQuery_init_zero;
-            if (pb_decode(&stream, &SensorQuery_msg, &query)) {
+            if (pb_decode(&stream, SensorQuery_fields, &query)) {
                 handle_sensor_query(&query);
             } else {
-                ESP_LOGE(TAG, "Failed to decode sensor query");
-            }
-            break;
-        }
-        
-        case MessageType_COMMAND: {
-            Command cmd = Command_init_zero;
-            if (pb_decode(&stream, &Command_msg, &cmd)) {
-                handle_command(&cmd);
-            } else {
-                ESP_LOGE(TAG, "Failed to decode command");
-            }
-            break;
-        }
-        
-        default:
-            ESP_LOGE(TAG, "Unknown message type: %d", message_type);
-            break;
-    }
-
-    return true;
-}
-
-bool test(const uint8_t* buffer, const uint64_t buffer_size) {
-    pb_istream_t stream = pb_istream_from_buffer(buffer, buffer_size);
-    uint64_t tag;
-    MessageType message_type;
-    
-    if (!pb_decode_varint(&stream, (uint64_t*)&tag)) {
-        return _MessageType_MIN; // or handle error
-    }
-
-    // Read message type value
-    if (!pb_decode_varint(&stream, (uint64_t*)&message_type)) {
-        return _MessageType_MIN; // or handle error
-    }
-
-    switch (message_type) {
-        case MessageType_SENSOR_QUERY: {
-            pb_istream_t stream = pb_istream_from_buffer(buffer, buffer_size);
-            SensorQuery query = SensorQuery_init_zero;
-            if (!pb_decode(&stream, SensorQuery_fields, &query)) {
                 ESP_LOGE(TAG, "Failed to decode SensorQuery: %s", PB_GET_ERROR(&stream));
                 return false;
             }
-
-            // Log common fields
-            ESP_LOGI(TAG, "Decoded SensorQuery:");
-            ESP_LOGI(TAG, "  Message type: %d", query.message_type);
-            ESP_LOGI(TAG, "  Sensor type: %d", query.sensor_type);
-
-            // Handle oneof body field
-            switch (query.which_body) {
-                case SensorQuery_mist_sensor_tag:
-                    ESP_LOGI(TAG, "  MistSensor data:");
-                    ESP_LOGI(TAG, "    Temperature: %.2f", query.body.mist_sensor.temperature);
-                    ESP_LOGI(TAG, "    Humidity: %.2f", query.body.mist_sensor.humidity);
-                    ESP_LOGI(TAG, "    Timestamp: %lld", query.body.mist_sensor.timestamp);
-                    break;
-
-                case SensorQuery_air_sensor_tag:
-                    ESP_LOGI(TAG, "  AirSensor data:");
-                    ESP_LOGI(TAG, "    Temperature: %.2f", query.body.air_sensor.temperature);
-                    ESP_LOGI(TAG, "    Humidity: %.2f", query.body.air_sensor.humidity);
-                    ESP_LOGI(TAG, "    Pressure: %.2f", query.body.air_sensor.pressure);
-                    ESP_LOGI(TAG, "    Timestamp: %lld", query.body.air_sensor.timestamp);
-                    break;
-
-                case SensorQuery_light_sensor_tag:
-                    ESP_LOGI(TAG, "  LightSensor data:");
-                    ESP_LOGI(TAG, "    Intensity: %llu", query.body.light_sensor.intensity);
-                    ESP_LOGI(TAG, "    Timestamp: %lld", query.body.light_sensor.timestamp);
-                    break;
-
-                default:
-                    ESP_LOGE(TAG, "Unknown sensor type in oneof");
-                    return false;
-            }
-
             break;
         }
-        
         case MessageType_COMMAND: {
             Command cmd = Command_init_zero;
             if (pb_decode(&stream, &Command_msg, &cmd)) {
                 handle_command(&cmd);
             } else {
-                ESP_LOGE(TAG, "Failed to decode command");
+                ESP_LOGE(TAG, "Failed to decode command: %s", PB_GET_ERROR(&stream));
+                return false;
             }
             break;
         }
         
         default:
             ESP_LOGE(TAG, "Unknown message type: %d", message_type);
-            break;
+            return false;
     }
 
     return true;
@@ -250,17 +190,10 @@ void app_main(void)
         return;
     }
 
-    // After encoding, add debug logging
-    // ESP_LOGI(TAG, "Encoded buffer size: %d", buffer_size);
-    // for(size_t i = 0; i < buffer_size; i++) {
-    //     ESP_LOGI(TAG, "buffer[%d] = 0x%02x", i, buffer[i]);
-    // }
-
-    test(buffer, buffer_size);
     // Broadcast the encoded message
-    // esp_err_t result = broadcast(buffer, buffer_size);
-    // if (result != ESP_OK) {
-    //     ESP_LOGE(TAG, "Failed to broadcast message");
-    //     return;
-    // }
+    esp_err_t result = broadcast(buffer, buffer_size);
+    if (result != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to broadcast message");
+        return;
+    }
 }

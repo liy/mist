@@ -92,13 +92,23 @@ void task_loop() {
         }
         free(task->buffer);
         free(task);
+
+// Only print high water mark when optimization is set to no optimization
+#if defined(CONFIG_COMPILER_OPTIMIZATION_SIZE) || defined(CONFIG_COMPILER_OPTIMIZATION_PERF)
+        // The high water mark value indicates the minimum amount of stack space that has remained unused.
+        // If the high water mark is very low (close to 0), it means the task is using almost all of its stack space, and you might need to increase the stack size.
+        // If the high water mark is high, you can reduce the stack size to save memory.
+        UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
+        ESP_LOGI(TAG, "High water mark: %d", uxHighWaterMark);
+#endif
+
     }
     vQueueDelete(s_espnow_queue);
     vTaskDelete(NULL);
 }
 
 esp_err_t init_queue() {
-    s_espnow_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(esp_now_peer_info_t));
+    s_espnow_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(task_t*));
     if (s_espnow_queue == NULL) {
         ESP_LOGE(TAG, "Error creating the ESPNOW queue");
     } else {
@@ -134,7 +144,8 @@ esp_err_t init_queue() {
     free(peer);
 
     // Start the queue pulling loop
-    xTaskCreate(task_loop, "task_loop", 2048, NULL, 4, NULL);
+    // Check uxTaskGetStackHighWaterMark to see if the stack size is enough
+    xTaskCreate(task_loop, "task_loop", 2400, NULL, 1, NULL);
 
     return ESP_OK;
 }
@@ -145,7 +156,7 @@ esp_err_t send(const uint8_t* buffer, const int64_t buffer_size, uint8_t des_mac
         ESP_LOGE(TAG, "Create task fail");
         return ESP_FAIL;
     }
-    
+
     // Send the structure to the queue, the structure will be cloned.
     // The receiver will be responsible for freeing the data, so it is safe to send pointer into the queue
     if (xQueueSend(s_espnow_queue, &task, ESPNOW_MAXDELAY) != pdTRUE) {
