@@ -18,7 +18,7 @@ static uint8_t broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 #define IS_BROADCAST_ADDR(addr) (memcmp(addr, broadcast_mac, ESP_NOW_ETH_ALEN) == 0)
 
 typedef struct {
-    bool is_outbound;
+    bool is_inbound;
     uint8_t mac_addr[ESP_NOW_ETH_ALEN];
     uint8_t *buffer;
     size_t buffer_size;

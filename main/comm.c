@@ -40,11 +40,17 @@ void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status) {
     ESP_LOGI(TAG, "Send callback, data to "MACSTR", status: %d", MAC2STR(mac_addr), status);
 }
 
-static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int data_len) {
+static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t* buffer, int buffer_size) {
     uint8_t *mac_addr = recv_info->src_addr;
     // uint8_t *des_addr = recv_info->des_addr;
+    ESP_LOGI(TAG, "Receive data from "MACSTR", len: %d", MAC2STR(mac_addr), buffer_size);
 
-    ESP_LOGI(TAG, "Receive data from "MACSTR", len: %d", MAC2STR(mac_addr), data_len);
+    task_t* task = create_task(buffer, buffer_size, mac_addr, true);
+    // Send the structure to the queue, the structure will be cloned.
+    // The receiver will be responsible for freeing the data, so it is safe to send pointer into the queue
+    if (xQueueSend(s_espnow_queue, &task, ESPNOW_MAXDELAY) != pdTRUE) {
+        ESP_LOGW(TAG, "Queue receive task fail");
+    }
 }
 
 
@@ -87,8 +93,22 @@ esp_err_t remove_peer(const uint8_t *peer_addr) {
 void task_loop() {
     task_t* task;
     while (xQueueReceive(s_espnow_queue, &task, portMAX_DELAY) == pdTRUE) {
-        if (s_message_handler != NULL && !s_message_handler(task)) {
-            ESP_LOGE(TAG, "Message handler failed");
+        // Parse the incoming message
+        if (task->is_inbound) {
+            if(s_message_handler != NULL) {
+                if (!s_message_handler(task)) {
+                    ESP_LOGE(TAG, "Message handler failed");
+                }
+            } else {
+                ESP_LOGW(TAG, "No message handler registered");
+            }
+        }
+        else {
+            ESP_LOGI(TAG, "Sending data to "MACSTR", len: %d", MAC2STR(task->mac_addr), task->buffer_size);
+            // Send the message
+            if (esp_now_send(task->mac_addr, task->buffer, task->buffer_size) != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to send message");
+            }
         }
         free(task->buffer);
         free(task);
@@ -151,7 +171,7 @@ esp_err_t init_queue() {
 }
 
 esp_err_t send(const uint8_t* buffer, const int64_t buffer_size, uint8_t des_mac[ESP_NOW_ETH_ALEN]) {
-    task_t* task = create_task(buffer, buffer_size, des_mac, true);
+    task_t* task = create_task(buffer, buffer_size, des_mac, false);
     if (task == NULL) {
         ESP_LOGE(TAG, "Create task fail");
         return ESP_FAIL;
@@ -160,7 +180,7 @@ esp_err_t send(const uint8_t* buffer, const int64_t buffer_size, uint8_t des_mac
     // Send the structure to the queue, the structure will be cloned.
     // The receiver will be responsible for freeing the data, so it is safe to send pointer into the queue
     if (xQueueSend(s_espnow_queue, &task, ESPNOW_MAXDELAY) != pdTRUE) {
-        ESP_LOGW(TAG, "Send receive queue fail");
+        ESP_LOGW(TAG, "Queue send task fail");
         return ESP_FAIL;
     }
 
@@ -171,14 +191,14 @@ esp_err_t broadcast(const uint8_t* buffer, const int64_t buffer_size) {
     return send(buffer, buffer_size, broadcast_mac);
 }
 
-task_t* create_task(const uint8_t* buffer, const int64_t buffer_size, uint8_t mac_addr[ESP_NOW_ETH_ALEN], bool is_outbound) {
+task_t* create_task(const uint8_t* buffer, const int64_t buffer_size, uint8_t mac_addr[ESP_NOW_ETH_ALEN], bool is_inbound) {
     task_t* task = malloc(sizeof(task_t));
     if (task == NULL) {
         ESP_LOGE(TAG, "Malloc task fail");
         return NULL;
     }
 
-    task->is_outbound = is_outbound;
+    task->is_inbound = is_inbound;
     task->buffer = malloc(buffer_size);
     memcpy(task->buffer, buffer, buffer_size);
     task->buffer_size = buffer_size;
