@@ -21,89 +21,20 @@ static const char *TAG = "Mist";
 // Queue for sending and receiving data
 static QueueHandle_t s_espnow_queue = NULL;
 
-// Broadcast MAC address
-static uint8_t s_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-
 
 // Discovery mode flag
 static bool discovery_mode = true;
 
-static addr_msg_t* create_addr_message(const uint8_t* addr) {
-    addr_msg_t *msg = malloc(sizeof(addr_msg_t));
-    if (msg != NULL) {
-        msg->header.type = MSG_TYPE_ADDRESS;
-        memcpy(msg->src_mac, addr, ESP_NOW_ETH_ALEN);
-    }
-    return msg;
+// Register a new message handler
+static message_handler_t s_message_handler;
+
+void register_message_handler(message_handler_t handler) {
+    s_message_handler = handler;
 }
 
-static bool deserialize_addr_message(addr_msg_t *msg, const uint8_t *buffer) {
-    if (msg == NULL || buffer == NULL) return false; 
-
-    size_t offset = sizeof(msg_header_t);
-    memcpy(msg->src_mac, buffer + offset, ESP_NOW_ETH_ALEN);
-
-    return true;
+void deregister_message_handler(void) {
+    s_message_handler = NULL;
 }
-
-static sensor_msg_t* create_sensor_message(uint8_t temperature, uint8_t humidity) {
-    sensor_msg_t *msg = malloc(sizeof(sensor_msg_t));
-    if (msg != NULL) {
-        msg->header.type = MSG_TYPE_SENSOR;
-        msg->temperature = temperature;
-        msg->humidity = humidity;
-    }
-    return msg;
-}
-
-static bool deserialize_sensor_message(sensor_msg_t *msg, const uint8_t *buffer) {
-    if (msg == NULL || buffer == NULL) return false; 
-
-    size_t offset = sizeof(msg_header_t);
-    memcpy(&msg->temperature, buffer + offset, sizeof(uint8_t));
-    offset += sizeof(uint8_t);
-    memcpy(&msg->humidity, buffer + offset, sizeof(uint8_t));
-
-    return true;
-}
-
-
-static query_msg_t* create_query_message(bool use_cache) {
-    query_msg_t *msg = malloc(sizeof(query_msg_t));
-    if (msg != NULL) {
-        msg->header.type = MSG_TYPE_QUERY;
-        msg->use_cache = use_cache;
-    }
-    return msg;
-}
-
-static bool deserialize_query_message(query_msg_t *msg, uint8_t *buffer) {
-    if (msg == NULL || buffer == NULL) return false; 
-    
-    size_t offset = sizeof(msg_header_t);
-    memcpy(&msg->use_cache, buffer + offset, sizeof(bool));
-
-    return true;
-}
-
-static instruction_msg_t* create_instruction_message(uint8_t instruction) {
-    instruction_msg_t *msg = malloc(sizeof(instruction_msg_t));
-    if (msg != NULL) {
-        msg->header.type = MSG_TYPE_INSTRUCTION;
-        msg->instruction = instruction;
-    }
-    return msg;
-}
-
-static bool deserialize_instruction_message(instruction_msg_t *msg, uint8_t *buffer) {
-    if (msg == NULL || buffer == NULL) return false; 
-
-    size_t offset = sizeof(msg_header_t);
-    memcpy(&msg->instruction, buffer + offset, sizeof(uint8_t));
-
-    return true;
-}
-
 
 void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status) {
     ESP_LOGI(TAG, "Send callback, data to "MACSTR", status: %d", MAC2STR(mac_addr), status);
@@ -155,47 +86,12 @@ esp_err_t remove_peer(const uint8_t *peer_addr) {
 
 void task_loop() {
     task_t* task;
-    while (true) {
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
-        if(xQueueReceive(s_espnow_queue, &task, portMAX_DELAY) == pdTRUE) {
-
-            switch(task->type) {
-                case MSG_TYPE_SENSOR:
-                    sensor_msg_t *msg = malloc(sizeof(sensor_msg_t));
-                    if(msg == NULL) {
-                        ESP_LOGE(TAG, "Malloc sensor message fail");
-                        free(task->buffer);
-                        free(task);
-                        continue;
-                    }
-                    
-                    if(!deserialize_sensor_message(msg, task->buffer)) {
-                        ESP_LOGE(TAG, "Deserialize sensor message fail");
-                        free(msg);
-                        free(task->buffer);
-                        free(task);
-                        continue;
-                    }
-
-                    // TODO: add sensor data to database
-                    ESP_LOGI(TAG, "Temperature: %d, Humidity: %d", msg->temperature, msg->humidity);
-                    break;
-                case MSG_TYPE_QUERY:
-                case MSG_TYPE_INSTRUCTION:
-                    if (esp_now_send(task->mac_addr, task->buffer, task->buffer_size) != ESP_OK) {
-                        ESP_LOGE(TAG, "Query send error");
-                        espnow_deinit(task);
-                        vTaskDelete(NULL);
-                    }
-                    ESP_LOGI(TAG, "Send message to "MACSTR"", MAC2STR(task->mac_addr));
-                    break;
-                default:
-                    ESP_LOGE(TAG, "Unknown message type");
-                    espnow_deinit(task);
-                    vTaskDelete(NULL);
-                    continue;
-            }
+    while (xQueueReceive(s_espnow_queue, &task, portMAX_DELAY) == pdTRUE) {
+        if (s_message_handler != NULL && !s_message_handler(task)) {
+            ESP_LOGE(TAG, "Message handler failed");
         }
+        free(task->buffer);
+        free(task);
     }
     vQueueDelete(s_espnow_queue);
     vTaskDelete(NULL);
@@ -233,7 +129,7 @@ esp_err_t init_queue() {
     // peer->ifidx = ESPNOW_WIFI_IF;
     // Data encryption configuration
     peer->encrypt = false;
-    memcpy(peer->peer_addr, s_broadcast_mac, ESP_NOW_ETH_ALEN);
+    memcpy(peer->peer_addr, broadcast_mac, ESP_NOW_ETH_ALEN);
     ESP_ERROR_CHECK( esp_now_add_peer(peer) );
     free(peer);
 
@@ -243,8 +139,8 @@ esp_err_t init_queue() {
     return ESP_OK;
 }
 
-esp_err_t send(msg_header_t* msg, uint8_t des_mac[ESP_NOW_ETH_ALEN]) {
-    task_t* task = create_task(msg, des_mac);
+esp_err_t send(const uint8_t* buffer, const int64_t buffer_size, uint8_t des_mac[ESP_NOW_ETH_ALEN]) {
+    task_t* task = create_task(buffer, buffer_size, des_mac, true);
     if (task == NULL) {
         ESP_LOGE(TAG, "Create task fail");
         return ESP_FAIL;
@@ -260,37 +156,22 @@ esp_err_t send(msg_header_t* msg, uint8_t des_mac[ESP_NOW_ETH_ALEN]) {
     return ESP_OK;
 }
 
-esp_err_t broadcast(msg_header_t* msg) {
-    return send(msg, s_broadcast_mac);
+esp_err_t broadcast(const uint8_t* buffer, const int64_t buffer_size) {
+    return send(buffer, buffer_size, broadcast_mac);
 }
 
-task_t* create_task(msg_header_t *msg, uint8_t mac_addr[ESP_NOW_ETH_ALEN]) {
+task_t* create_task(const uint8_t* buffer, const int64_t buffer_size, uint8_t mac_addr[ESP_NOW_ETH_ALEN], bool is_outbound) {
     task_t* task = malloc(sizeof(task_t));
     if (task == NULL) {
         ESP_LOGE(TAG, "Malloc task fail");
         return NULL;
     }
-    
-    task->type = msg->type;
-    switch(msg->type) {
-        case MSG_TYPE_SENSOR:
-            task->buffer_size = sizeof(sensor_msg_t);
-            break;
-        case MSG_TYPE_QUERY:
-            task->buffer_size = sizeof(query_msg_t);
-            break;
-        case MSG_TYPE_INSTRUCTION:
-            task->buffer_size = sizeof(instruction_msg_t);
-            break;
-        default:
-            ESP_LOGE(TAG, "Unknown message type");
-            free(task);
-            return NULL;
-    }
 
+    task->is_outbound = is_outbound;
+    task->buffer = malloc(buffer_size);
+    memcpy(task->buffer, buffer, buffer_size);
+    task->buffer_size = buffer_size;
     memcpy(task->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
-    task->buffer = malloc(task->buffer_size);
-    memcpy(task->buffer, msg, task->buffer_size);
 
     return task;
 }
@@ -299,8 +180,6 @@ esp_err_t comm_init() {
     if(init_queue() != ESP_OK) {
         return ESP_FAIL;
     }
-
-    broadcast((msg_header_t*)create_sensor_message(37, 58));
     
     return ESP_OK;
 }
@@ -318,13 +197,13 @@ void set_discovery_mode(bool enabled) {
         // peer->ifidx = ESPNOW_WIFI_IF;
         // Data encryption configuration
         peer->encrypt = false;
-        memcpy(peer->peer_addr, s_broadcast_mac, ESP_NOW_ETH_ALEN);
+        memcpy(peer->peer_addr, broadcast_mac, ESP_NOW_ETH_ALEN);
         ESP_ERROR_CHECK( esp_now_add_peer(peer) );
         free(peer);
         discovery_mode = true;
     } else {
         discovery_mode = false;
-        remove_peer(s_broadcast_mac);
+        remove_peer(broadcast_mac);
     }
 }
 
