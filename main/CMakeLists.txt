@@ -13,5 +13,5 @@ idf_component_register(
         "../proto_generated"
 
         # Make sure nanopb component is included
-        REQUIRES nanopb
+        REQUIRES nanopb wireless time_sync
 )

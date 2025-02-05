@@ -1,4 +1,18 @@
-#include "espnow.h"
+#include <stdlib.h>
+#include <time.h>
+#include <string.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/timers.h>
+#include <esp_random.h>
+#include <esp_event.h>
+#include <esp_netif.h>
+#include <esp_wifi.h>
+#include <esp_log.h>
+#include <esp_mac.h>
+#include <esp_now.h>
+#include <esp_crc.h>
+#include "comm.h"
 
 #define ESPNOW_MAXDELAY 512
 
@@ -14,22 +28,82 @@ static uint8_t s_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xF
 // Discovery mode flag
 static bool discovery_mode = true;
 
-/* WiFi should start before using ESPNOW */
-static void init_wifi(void)
-{
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM) );
-    ESP_ERROR_CHECK(esp_wifi_set_mode(ESPNOW_WIFI_MODE));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_ERROR_CHECK(esp_wifi_set_channel(CONFIG_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE));
-
-#if CONFIG_ESPNOW_ENABLE_LONG_RANGE
-    ESP_ERROR_CHECK( esp_wifi_set_protocol(ESPNOW_WIFI_IF, WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_LR) );
-#endif
+static addr_msg_t* create_addr_message(const uint8_t* addr) {
+    addr_msg_t *msg = malloc(sizeof(addr_msg_t));
+    if (msg != NULL) {
+        msg->header.type = MSG_TYPE_ADDRESS;
+        memcpy(msg->src_mac, addr, ESP_NOW_ETH_ALEN);
+    }
+    return msg;
 }
+
+static bool deserialize_addr_message(addr_msg_t *msg, const uint8_t *buffer) {
+    if (msg == NULL || buffer == NULL) return false; 
+
+    size_t offset = sizeof(msg_header_t);
+    memcpy(msg->src_mac, buffer + offset, ESP_NOW_ETH_ALEN);
+
+    return true;
+}
+
+static sensor_msg_t* create_sensor_message(uint8_t temperature, uint8_t humidity) {
+    sensor_msg_t *msg = malloc(sizeof(sensor_msg_t));
+    if (msg != NULL) {
+        msg->header.type = MSG_TYPE_SENSOR;
+        msg->temperature = temperature;
+        msg->humidity = humidity;
+    }
+    return msg;
+}
+
+static bool deserialize_sensor_message(sensor_msg_t *msg, const uint8_t *buffer) {
+    if (msg == NULL || buffer == NULL) return false; 
+
+    size_t offset = sizeof(msg_header_t);
+    memcpy(&msg->temperature, buffer + offset, sizeof(uint8_t));
+    offset += sizeof(uint8_t);
+    memcpy(&msg->humidity, buffer + offset, sizeof(uint8_t));
+
+    return true;
+}
+
+
+static query_msg_t* create_query_message(bool use_cache) {
+    query_msg_t *msg = malloc(sizeof(query_msg_t));
+    if (msg != NULL) {
+        msg->header.type = MSG_TYPE_QUERY;
+        msg->use_cache = use_cache;
+    }
+    return msg;
+}
+
+static bool deserialize_query_message(query_msg_t *msg, uint8_t *buffer) {
+    if (msg == NULL || buffer == NULL) return false; 
+    
+    size_t offset = sizeof(msg_header_t);
+    memcpy(&msg->use_cache, buffer + offset, sizeof(bool));
+
+    return true;
+}
+
+static instruction_msg_t* create_instruction_message(uint8_t instruction) {
+    instruction_msg_t *msg = malloc(sizeof(instruction_msg_t));
+    if (msg != NULL) {
+        msg->header.type = MSG_TYPE_INSTRUCTION;
+        msg->instruction = instruction;
+    }
+    return msg;
+}
+
+static bool deserialize_instruction_message(instruction_msg_t *msg, uint8_t *buffer) {
+    if (msg == NULL || buffer == NULL) return false; 
+
+    size_t offset = sizeof(msg_header_t);
+    memcpy(&msg->instruction, buffer + offset, sizeof(uint8_t));
+
+    return true;
+}
+
 
 void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status) {
     ESP_LOGI(TAG, "Send callback, data to "MACSTR", status: %d", MAC2STR(mac_addr), status);
@@ -51,7 +125,7 @@ esp_err_t add_peer(const uint8_t *peer_addr) {
     }
     memset(peer, 0, sizeof(esp_now_peer_info_t));
     peer->channel = CONFIG_ESPNOW_CHANNEL;
-    peer->ifidx = ESPNOW_WIFI_IF;
+    // peer->ifidx = ESPNOW_WIFI_IF;
     peer->encrypt = false;
     memcpy(peer->peer_addr, peer_addr, ESP_NOW_ETH_ALEN);
     ESP_ERROR_CHECK(esp_now_add_peer(peer));
@@ -156,7 +230,7 @@ esp_err_t init_queue() {
     }
     memset(peer, 0, sizeof(esp_now_peer_info_t));
     peer->channel = CONFIG_ESPNOW_CHANNEL;
-    peer->ifidx = ESPNOW_WIFI_IF;
+    // peer->ifidx = ESPNOW_WIFI_IF;
     // Data encryption configuration
     peer->encrypt = false;
     memcpy(peer->peer_addr, s_broadcast_mac, ESP_NOW_ETH_ALEN);
@@ -221,17 +295,7 @@ task_t* create_task(msg_header_t *msg, uint8_t mac_addr[ESP_NOW_ETH_ALEN]) {
     return task;
 }
 
-esp_err_t espnow_init() {
-    // Initialize NVS, this is required by wifi
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK( nvs_flash_erase() );
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK( ret );
-
-    init_wifi();
-
+esp_err_t comm_init() {
     if(init_queue() != ESP_OK) {
         return ESP_FAIL;
     }
@@ -251,7 +315,7 @@ void set_discovery_mode(bool enabled) {
         }
         memset(peer, 0, sizeof(esp_now_peer_info_t));
         peer->channel = CONFIG_ESPNOW_CHANNEL;
-        peer->ifidx = ESPNOW_WIFI_IF;
+        // peer->ifidx = ESPNOW_WIFI_IF;
         // Data encryption configuration
         peer->encrypt = false;
         memcpy(peer->peer_addr, s_broadcast_mac, ESP_NOW_ETH_ALEN);

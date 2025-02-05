@@ -1,5 +1,6 @@
 #include "esp_sntp.h"
 #include "esp_log.h"
+#include "time_sync.h"
 
 static const char *TAG = "time_sync";
 

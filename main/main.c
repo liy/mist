@@ -1,10 +1,14 @@
-#include "espnow.h"
+#include <time.h>
+#include <nvs_flash.h>
+#include <esp_log.h>
 #include "pb_encode.h"
 #include "pb_decode.h"
 #include "messages.pb.h"
-#include <time.h>
-#include "wifi.h"
+#include "wireless.h"
 #include "time_sync.h"
+
+#include <esp_now.h>
+#include "comm.h"
 
 #define WIFI_SSID      "lijilin_2.4G"
 #define WIFI_PASS      "lijilinlijilin"
@@ -49,10 +53,10 @@ void app_main(void)
     // Create and initialize a MistSensor message
     MistSensor mist_sensor = MistSensor_init_default;
     mist_sensor.timestamp = now;
-    mist_sensor.has_temperature = true;
     mist_sensor.temperature = 25.5;
-    mist_sensor.has_humidity = true;
     mist_sensor.humidity = 60.0;
+    uint8_t mac[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    memcpy(mist_sensor.mac_addr, mac, sizeof(mac));
 
     // Encode the MistSensor message
     uint8_t buffer[128];
@@ -86,5 +90,5 @@ void app_main(void)
 
 
     // Initialize ESPNOW
-    // espnow_init();
+    comm_init();
 }
