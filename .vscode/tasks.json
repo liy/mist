@@ -4,7 +4,7 @@
     {
       "label": "Proto",
       "type": "shell",
-      "command": "${workspaceFolder}/components/nanopb/scripts/proto_compile.sh",
+      "command": "${workspaceFolder}/components/mist_messages/scripts/proto_compile.sh",
       "group": {
         "kind": "build",
         "isDefault": true

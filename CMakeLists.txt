@@ -6,7 +6,7 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # Compile the protobuf files
 message(STATUS "Running proto_compile.sh to compile proto files...")
 execute_process(
-    COMMAND bash "${CMAKE_SOURCE_DIR}/components/nanopb/scripts/proto_compile.sh"
+    COMMAND bash "${CMAKE_SOURCE_DIR}/components/mist_messages/scripts/proto_compile.sh"
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output

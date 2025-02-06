@@ -6,6 +6,6 @@ idf_component_register(
         PRIV_REQUIRES nvs_flash esp_event esp_netif esp_wifi
         INCLUDE_DIRS "."
 
-        # Make sure nanopb component is included
-        REQUIRES nanopb wireless time_sync comm
+        # Make sure other components are included
+        REQUIRES mist_messages wireless time_sync comm
 )
