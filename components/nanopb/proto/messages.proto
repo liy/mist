@@ -1,0 +1,73 @@
+syntax = "proto2";
+
+import "nanopb.proto";
+
+enum SensorType {
+  MIST_SENSOR = 0;
+  AIR_SENSOR = 1;
+  LIGHT_SENSOR = 2;
+}
+
+message MistSensor {
+  required SensorType sensor_type = 1 [default = MIST_SENSOR];
+  required int64 timestamp = 2 [default = 0];
+  required float temperature = 3;
+  required float humidity = 4;
+  required bytes mac_addr = 5 [(nanopb).max_size = 6, (nanopb).fixed_length = true];
+}
+
+message AirSensor {
+  required SensorType sensor_type = 1 [default = AIR_SENSOR];
+  required int64 timestamp = 2 [default = 0];
+  required float temperature = 3;
+  required float humidity = 4;
+  required float pressure = 5;
+  required bytes mac_addr = 6 [(nanopb).max_size = 6, (nanopb).fixed_length = true];
+}
+
+message LightSensor {
+  required SensorType sensor_type = 1 [default = LIGHT_SENSOR];
+  required int64 timestamp = 2 [default = 0];
+  required uint64 intensity = 3;
+  required bytes mac_addr = 4 [(nanopb).max_size = 6, (nanopb).fixed_length = true];
+}
+
+enum MessageType {
+  SENSOR_QUERY = 0;
+  COMMAND = 1;
+}
+
+message SensorQuery {
+  required MessageType message_type = 1;
+  required SensorType sensor_type = 2;
+  oneof body {
+    MistSensor mist_sensor = 3;
+    AirSensor air_sensor = 4;
+    LightSensor light_sensor = 5;
+  }
+}
+
+message Command {
+  required MessageType message_type = 1;
+  required int64 id = 2;
+  oneof body {
+    TimeSync time_sync = 3;
+    SleepCycle sleep_cycle = 4;
+  }
+}
+
+message TimeSync {
+  optional int64 timestamp = 2;
+}
+
+message SleepCycle {
+  required int64 sleep_time = 2;
+}
+
+message ACK {
+  required int64 id = 1;
+}
+
+message NACK {
+  required int64 id = 1;
+}
