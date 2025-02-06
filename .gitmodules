@@ -1,0 +1,3 @@
+[submodule "components/mist_messages"]
+	path = components/mist_messages
+	url = git@github.com:liy/mist_messages.git
