@@ -7,5 +7,5 @@ idf_component_register(
         INCLUDE_DIRS "."
 
         # Make sure other components are included
-        REQUIRES mist_messages wireless time_sync comm
+        REQUIRES mist_messages mist_wireless time_sync mist_comm
 )
