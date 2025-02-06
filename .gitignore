@@ -46,6 +46,3 @@ components/*/cmake_install.cmake
 components/*/Makefile
 
 managed_components
-
-# Ignore the generated protobuf files
-proto_generated/*

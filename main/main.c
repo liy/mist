@@ -1,12 +1,16 @@
 #include <time.h>
 #include <nvs_flash.h>
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <esp_wifi.h>
+#include <string.h>
+
 #include "pb_encode.h"
 #include "pb_decode.h"
 #include "messages.pb.h"
 #include "wireless.h"
 #include "time_sync.h"
-
 #include <esp_now.h>
 #include "comm.h"
 
@@ -14,6 +18,9 @@
 #define WIFI_PASS      "lijilinlijilin"
 
 static const char *TAG = "Mist";
+
+// Task handle to notify when slave has sent over its the address
+TaskHandle_t xHandshakeToNotify = NULL;
 
 void nvs_init() {
     // Initialize NVS
@@ -118,13 +125,67 @@ static bool task_handler(const task_t* task) {
             }
             break;
         }
-        
+        case MessageType_SLAVERY_HANDSHAKE: {
+            SlaveryHandshake handshake = SlaveryHandshake_init_zero;
+            if (pb_decode(&stream, SlaveryHandshake_fields, &handshake)) {
+                if(memcmp(handshake.master_mac_addr, BROADCAST_MAC_ADDR, ESP_NOW_ETH_ALEN) != 0) {
+                    ESP_LOGE(TAG, "MAC address mismatch!");                    
+                    return false;
+                } 
+                
+                // ESP_LOGI(TAG, "Received slave MAC address: "MACSTR"", MAC2STR(handshake.slave_mac_addr));
+                add_peer(handshake.slave_mac_addr, false);
+                // Notify that slave has sent the address, and handshake is complete
+                xTaskNotifyGive(xHandshakeToNotify);
+                // Suspend the current task
+                vTaskSuspend(NULL);
+            } else {
+                ESP_LOGE(TAG, "Failed to decode SlaveryHandshake: %s", PB_GET_ERROR(&stream));
+                return false;
+            }
+            break;
+        }
         default:
             ESP_LOGE(TAG, "Unknown message type: %d", message_type);
             return false;
     }
 
     return true;
+}
+
+void start_slavery_handshake() {
+    // Broadcast SlaveryHandshake message
+    SlaveryHandshake handshake = SlaveryHandshake_init_zero;
+    handshake.message_type = MessageType_SLAVERY_HANDSHAKE;
+    memcpy(handshake.master_mac_addr, BROADCAST_MAC_ADDR, ESP_NOW_ETH_ALEN);
+    size_t buffer_size = 0;
+    if (!pb_get_encoded_size(&buffer_size, SlaveryHandshake_fields, &handshake)) {
+        ESP_LOGE(TAG, "Failed to get encoded size");
+        return;
+    }
+    uint8_t buffer[buffer_size];
+    pb_ostream_t stream = pb_ostream_from_buffer(buffer, buffer_size);
+    bool status = pb_encode(&stream, SlaveryHandshake_fields, &handshake);
+    if (!status) {
+        ESP_LOGE(TAG, "Encoding failed: %s", PB_GET_ERROR(&stream));
+        return;
+    }
+    // Broadcast sensor mac address
+    uint8_t mac[6];
+    esp_err_t ret = esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get MAC address");
+        return;
+    }
+    for(uint i = 0; i < 60; i++) {
+        if(ulTaskNotifyTake(pdTRUE, 1000 / portTICK_PERIOD_MS) == 1) {
+            ESP_LOGI(TAG, "Exiting loop as signaled");
+            break;
+        }
+        ESP_LOGI(TAG, "Broadcasting Master MAC address...");
+        broadcast(mac, ESP_NOW_ETH_ALEN);
+    }
+
 }
 
 void app_main(void)
@@ -142,6 +203,7 @@ void app_main(void)
 
     // Initialize ESPNOW
     comm_init();
+    add_peer(BROADCAST_MAC_ADDR, false);
     register_message_handler(task_handler);
 
     // Get current time
@@ -156,46 +218,59 @@ void app_main(void)
     ESP_LOGI(TAG, "  UTC time:       %s", asctime(&timeinfo));
     ESP_LOGI(TAG, "  Local time:     %s", ctime(&now));
 
-    // Create a sensor query message
-    SensorQuery query = SensorQuery_init_zero;
-    query.message_type = MessageType_SENSOR_QUERY;
-    query.sensor_type = SensorType_AIR_SENSOR;
-    // If you need to set the body (optional)
-    query.which_body = SensorQuery_air_sensor_tag;
-    query.body.air_sensor.sensor_type = SensorType_AIR_SENSOR;
-    query.body.air_sensor.timestamp = time(NULL);
-    query.body.air_sensor.humidity = 0.5;
-    query.body.air_sensor.temperature = 20;
-    query.body.air_sensor.pressure = 1013.25;
-    memcpy(query.body.air_sensor.mac_addr, BROADCAST_MAC_ADDR, ESP_NOW_ETH_ALEN);
+    // Store the handle of the current handshake task
+    xHandshakeToNotify = xTaskGetCurrentTaskHandle();
+    // Start the handshake process
+    start_slavery_handshake();
 
-    // Log the sensor query message
-    ESP_LOGI(TAG, "Sensor query message created:");
-    ESP_LOGI(TAG, "  Message type: %d", query.message_type);
-    ESP_LOGI(TAG, "  Sensor type:  %d", query.sensor_type);
+    
 
 
-    // Create output buffer for encoding
-    size_t buffer_size = 0;
-    if (!pb_get_encoded_size(&buffer_size, SensorQuery_fields, &query)) {
-        ESP_LOGE(TAG, "Failed to get encoded size");
-        return;
-    }
-    uint8_t buffer[buffer_size];
-
-    // Create stream for encoding
-    pb_ostream_t stream = pb_ostream_from_buffer(buffer, buffer_size);
-    // Encode the message
-    bool status = pb_encode(&stream, SensorQuery_fields, &query);
-    if (!status) {
-        ESP_LOGE(TAG, "Encoding failed: %s", PB_GET_ERROR(&stream));
-        return;
+    // Dummy main loop
+    while (1) {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 
-    // Broadcast the encoded message
-    esp_err_t result = broadcast(buffer, buffer_size);
-    if (result != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to broadcast message");
-        return;
-    }
+    // // Create a sensor query message
+    // SensorQuery query = SensorQuery_init_zero;
+    // query.message_type = MessageType_SENSOR_QUERY;
+    // query.sensor_type = SensorType_AIR_SENSOR;
+    // // If you need to set the body (optional)
+    // query.which_body = SensorQuery_air_sensor_tag;
+    // query.body.air_sensor.sensor_type = SensorType_AIR_SENSOR;
+    // query.body.air_sensor.timestamp = time(NULL);
+    // query.body.air_sensor.humidity = 0.5;
+    // query.body.air_sensor.temperature = 20;
+    // query.body.air_sensor.pressure = 1013.25;
+    // memcpy(query.body.air_sensor.mac_addr, BROADCAST_MAC_ADDR, ESP_NOW_ETH_ALEN);
+
+    // // Log the sensor query message
+    // ESP_LOGI(TAG, "Sensor query message created:");
+    // ESP_LOGI(TAG, "  Message type: %d", query.message_type);
+    // ESP_LOGI(TAG, "  Sensor type:  %d", query.sensor_type);
+
+
+    // // Create output buffer for encoding
+    // size_t buffer_size = 0;
+    // if (!pb_get_encoded_size(&buffer_size, SensorQuery_fields, &query)) {
+    //     ESP_LOGE(TAG, "Failed to get encoded size");
+    //     return;
+    // }
+    // uint8_t buffer[buffer_size];
+
+    // // Create stream for encoding
+    // pb_ostream_t stream = pb_ostream_from_buffer(buffer, buffer_size);
+    // // Encode the message
+    // bool status = pb_encode(&stream, SensorQuery_fields, &query);
+    // if (!status) {
+    //     ESP_LOGE(TAG, "Encoding failed: %s", PB_GET_ERROR(&stream));
+    //     return;
+    // }
+
+    // // Broadcast the encoded message
+    // esp_err_t result = broadcast(buffer, buffer_size);
+    // if (result != ESP_OK) {
+    //     ESP_LOGE(TAG, "Failed to broadcast message");
+    //     return;
+    // }
 }

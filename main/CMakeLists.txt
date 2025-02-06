@@ -1,5 +1,5 @@
 # Collect all .c files in the main directory
-file(GLOB MAIN_SRCS "comm.c" "main.c" "*.c")
+file(GLOB MAIN_SRCS "main.c" "*.c")
 
 idf_component_register(
         SRCS ${MAIN_SRCS}
