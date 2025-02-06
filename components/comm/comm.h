@@ -9,13 +9,20 @@
 
 #pragma once
 
+/* ESPNOW can work in both station and softap mode. It is configured in menuconfig. */
+#if CONFIG_ESPNOW_WIFI_MODE_STATION
+#define ESPNOW_WIFI_MODE WIFI_MODE_STA
+#define ESPNOW_WIFI_IF   ESP_IF_WIFI_STA
+#else
+#define ESPNOW_WIFI_MODE WIFI_MODE_AP
+#define ESPNOW_WIFI_IF   ESP_IF_WIFI_AP
+#endif
+
 #define ESPNOW_QUEUE_SIZE           6
 
-
 // Broadcast MAC address
-static uint8_t broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-
-#define IS_BROADCAST_ADDR(addr) (memcmp(addr, broadcast_mac, ESP_NOW_ETH_ALEN) == 0)
+static const uint8_t BROADCAST_MAC_ADDR[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+#define IS_BROADCAST_ADDR(addr) (memcmp(addr, BROADCAST_MAC_ADDR, ESP_NOW_ETH_ALEN) == 0)
 
 typedef struct {
     bool is_inbound;
@@ -24,28 +31,19 @@ typedef struct {
     size_t buffer_size;
 } task_t;
 
-task_t* create_task(const uint8_t* buffer, const int64_t buffer_size, uint8_t mac_addr[ESP_NOW_ETH_ALEN], bool is_outbound);
-
 esp_err_t comm_init(void);
 
+void comm_deinit(void);
+
 // Send data to a specific MAC address
-esp_err_t send(const uint8_t* buffer, const int64_t buffer_size, uint8_t des_mac[ESP_NOW_ETH_ALEN]);
+esp_err_t send(const uint8_t* buffer, const int64_t buffer_size, const uint8_t des_mac[ESP_NOW_ETH_ALEN]);
 
 // Broadcast data to all peers
 esp_err_t broadcast(const uint8_t* buffer, const int64_t buffer_size);
 
-/**
- * @brief Enables or disables the discovery mode.
- *
- * This function sets the discovery mode to either enabled or disabled.
- * When discovery mode is enabled, the device will be listening for public broadcasts.
- *
- * @param enabled A boolean value indicating whether to enable (true) or disable (false) discovery mode.
- */
-void set_discovery_mode(bool enabled);
+esp_err_t add_peer(const uint8_t *peer_mac_addr, bool encrypt);
 
-bool get_discovery_mode(void);
-
+esp_err_t remove_peer(const uint8_t *peer_mac_addr);
 
 /**
  * @typedef message_handler_t

@@ -1,4 +1,0 @@
-# myproto.options
-
-# 6 bytes mac address
-# MacAddress.src_mac  fixed_length:true   max_size:6

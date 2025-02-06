@@ -21,12 +21,24 @@ static const char *TAG = "Mist";
 // Queue for sending and receiving data
 static QueueHandle_t s_espnow_queue = NULL;
 
-
-// Discovery mode flag
-static bool discovery_mode = true;
-
 // Register a new message handler
 static message_handler_t s_message_handler;
+
+static task_t* create_task(const uint8_t* buffer, const int64_t buffer_size, const uint8_t mac_addr[ESP_NOW_ETH_ALEN], bool is_inbound) {
+    task_t* task = malloc(sizeof(task_t));
+    if (task == NULL) {
+        ESP_LOGE(TAG, "Malloc task fail");
+        return NULL;
+    }
+
+    task->is_inbound = is_inbound;
+    task->buffer = malloc(buffer_size);
+    memcpy(task->buffer, buffer, buffer_size);
+    task->buffer_size = buffer_size;
+    memcpy(task->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
+
+    return task;
+}
 
 void register_message_handler(message_handler_t handler) {
     s_message_handler = handler;
@@ -36,7 +48,7 @@ void deregister_message_handler(void) {
     s_message_handler = NULL;
 }
 
-void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status) {
+static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status) {
     ESP_LOGI(TAG, "Send callback, data to "MACSTR", status: %d", MAC2STR(mac_addr), status);
 }
 
@@ -53,44 +65,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t* 
     }
 }
 
-
-esp_err_t add_peer(const uint8_t *peer_addr) {
-    esp_now_peer_info_t *peer = malloc(sizeof(esp_now_peer_info_t));
-    if (peer == NULL) {
-        ESP_LOGE(TAG, "Malloc peer information fail");
-        return ESP_FAIL;
-    }
-    memset(peer, 0, sizeof(esp_now_peer_info_t));
-    peer->channel = CONFIG_ESPNOW_CHANNEL;
-    // peer->ifidx = ESPNOW_WIFI_IF;
-    peer->encrypt = false;
-    memcpy(peer->peer_addr, peer_addr, ESP_NOW_ETH_ALEN);
-    ESP_ERROR_CHECK(esp_now_add_peer(peer));
-    free(peer);
-    return ESP_OK;
-}
-
-/**
-* @brief Clean up ESPNOW queue data.
-*/ 
-static void espnow_deinit(task_t *task)
-{
-    free(task->buffer);
-    free(task);
-    vSemaphoreDelete(s_espnow_queue);
-    esp_now_deinit();
-}
-
-// Function to remove a peer
-esp_err_t remove_peer(const uint8_t *peer_addr) {
-    esp_err_t err = esp_now_del_peer(peer_addr);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to remove peer: %s", esp_err_to_name(err));
-    }
-    return err;
-}
-
-void task_loop() {
+static void task_loop() {
     task_t* task;
     while (xQueueReceive(s_espnow_queue, &task, portMAX_DELAY) == pdTRUE) {
         // Parse the incoming message
@@ -127,7 +102,7 @@ void task_loop() {
     vTaskDelete(NULL);
 }
 
-esp_err_t init_queue() {
+static esp_err_t init_queue() {
     s_espnow_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(task_t*));
     if (s_espnow_queue == NULL) {
         ESP_LOGE(TAG, "Error creating the ESPNOW queue");
@@ -146,23 +121,6 @@ esp_err_t init_queue() {
     /* Set primary master key. */
     ESP_ERROR_CHECK(esp_now_set_pmk((uint8_t *)CONFIG_ESPNOW_PMK));
 
-    /* Add broadcast peer information to peer list. */
-    esp_now_peer_info_t *peer = malloc(sizeof(esp_now_peer_info_t));
-    if (peer == NULL) {
-        ESP_LOGE(TAG, "Malloc peer information fail");
-        vSemaphoreDelete(s_espnow_queue);
-        esp_now_deinit();
-        return ESP_FAIL;
-    }
-    memset(peer, 0, sizeof(esp_now_peer_info_t));
-    peer->channel = CONFIG_ESPNOW_CHANNEL;
-    // peer->ifidx = ESPNOW_WIFI_IF;
-    // Data encryption configuration
-    peer->encrypt = false;
-    memcpy(peer->peer_addr, broadcast_mac, ESP_NOW_ETH_ALEN);
-    ESP_ERROR_CHECK( esp_now_add_peer(peer) );
-    free(peer);
-
     // Start the queue pulling loop
     // Check uxTaskGetStackHighWaterMark to see if the stack size is enough
     xTaskCreate(task_loop, "task_loop", 2400, NULL, 1, NULL);
@@ -170,7 +128,7 @@ esp_err_t init_queue() {
     return ESP_OK;
 }
 
-esp_err_t send(const uint8_t* buffer, const int64_t buffer_size, uint8_t des_mac[ESP_NOW_ETH_ALEN]) {
+esp_err_t send(const uint8_t* buffer, const int64_t buffer_size, const uint8_t des_mac[ESP_NOW_ETH_ALEN]) {
     task_t* task = create_task(buffer, buffer_size, des_mac, false);
     if (task == NULL) {
         ESP_LOGE(TAG, "Create task fail");
@@ -188,23 +146,7 @@ esp_err_t send(const uint8_t* buffer, const int64_t buffer_size, uint8_t des_mac
 }
 
 esp_err_t broadcast(const uint8_t* buffer, const int64_t buffer_size) {
-    return send(buffer, buffer_size, broadcast_mac);
-}
-
-task_t* create_task(const uint8_t* buffer, const int64_t buffer_size, uint8_t mac_addr[ESP_NOW_ETH_ALEN], bool is_inbound) {
-    task_t* task = malloc(sizeof(task_t));
-    if (task == NULL) {
-        ESP_LOGE(TAG, "Malloc task fail");
-        return NULL;
-    }
-
-    task->is_inbound = is_inbound;
-    task->buffer = malloc(buffer_size);
-    memcpy(task->buffer, buffer, buffer_size);
-    task->buffer_size = buffer_size;
-    memcpy(task->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
-
-    return task;
+    return send(buffer, buffer_size, BROADCAST_MAC_ADDR);
 }
 
 esp_err_t comm_init() {
@@ -215,29 +157,45 @@ esp_err_t comm_init() {
     return ESP_OK;
 }
 
-void set_discovery_mode(bool enabled) {
-    if (enabled) {
-        // Add broadcast peer information to peer list
-        esp_now_peer_info_t *peer = malloc(sizeof(esp_now_peer_info_t));
-        if (peer == NULL) {
-            ESP_LOGE(TAG, "Malloc peer information fail");
-            return;
-        }
-        memset(peer, 0, sizeof(esp_now_peer_info_t));
-        peer->channel = CONFIG_ESPNOW_CHANNEL;
-        // peer->ifidx = ESPNOW_WIFI_IF;
-        // Data encryption configuration
-        peer->encrypt = false;
-        memcpy(peer->peer_addr, broadcast_mac, ESP_NOW_ETH_ALEN);
-        ESP_ERROR_CHECK( esp_now_add_peer(peer) );
-        free(peer);
-        discovery_mode = true;
-    } else {
-        discovery_mode = false;
-        remove_peer(broadcast_mac);
-    }
+/**
+* @brief Clean up queue and deinitialize ESPNOW.
+*/ 
+void comm_deinit()
+{
+    vTaskDelete(NULL);
+    vSemaphoreDelete(s_espnow_queue);
+    esp_now_deinit();
 }
 
-bool get_discovery_mode(void) {
-    return discovery_mode;
+esp_err_t add_peer(const uint8_t *peer_mac_addr, bool encrypt) {
+    // Add broadcast peer information to peer list
+    esp_now_peer_info_t *peer = malloc(sizeof(esp_now_peer_info_t));
+    if (peer == NULL) {
+        ESP_LOGE(TAG, "Malloc peer information fail");
+        vSemaphoreDelete(s_espnow_queue);
+        esp_now_deinit();
+        return ESP_FAIL;
+    }
+    memset(peer, 0, sizeof(esp_now_peer_info_t));
+    peer->channel = CONFIG_ESPNOW_CHANNEL;
+    peer->ifidx = ESPNOW_WIFI_IF;
+    // Data encryption configuration
+    peer->encrypt = encrypt;
+    memcpy(peer->peer_addr, BROADCAST_MAC_ADDR, ESP_NOW_ETH_ALEN);
+    const esp_err_t err = esp_now_add_peer(peer);
+    if(err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add peer: %s", esp_err_to_name(err));
+    }
+    free(peer);
+
+    return err;
+}
+
+// Function to remove a peer
+esp_err_t remove_peer(const uint8_t *peer_addr) {
+    const esp_err_t err = esp_now_del_peer(peer_addr);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to remove peer: %s", esp_err_to_name(err));
+    }
+    return err;
 }

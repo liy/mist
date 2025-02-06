@@ -28,8 +28,10 @@ void nvs_init() {
 static void handle_sensor_query(const SensorQuery* query) {
     switch (query->sensor_type) {
         case SensorType_MIST_SENSOR:
-            ESP_LOGI(TAG, "Received MIST_SENSOR query, timestamp: %lld", 
-                     query->body.mist_sensor.timestamp);
+            // ESP_LOGI(TAG, "Received MIST_SENSOR query, timestamp: %lld", 
+            //          query->body.mist_sensor.timestamp);
+            ESP_LOGI(TAG, "Received MIST_SENSOR query, timestamp: %lld, humidity: %f, temperature: %f", 
+                     query->body.mist_sensor.timestamp, query->body.mist_sensor.humidity, query->body.mist_sensor.temperature);
             break;
             
         case SensorType_AIR_SENSOR:
@@ -38,8 +40,8 @@ static void handle_sensor_query(const SensorQuery* query) {
             break;
             
         case SensorType_LIGHT_SENSOR:
-            ESP_LOGI(TAG, "Received LIGHT_SENSOR query, timestamp: %lld", 
-                     query->body.light_sensor.timestamp);
+            ESP_LOGI(TAG, "Received LIGHT_SENSOR query, timestamp: %lld, light intensity: %f", 
+                     query->body.light_sensor.timestamp, query->body.light_sensor.intensity);
             break;
             
         default:
@@ -70,7 +72,7 @@ static void handle_command(const Command* cmd) {
     }
 }
 
-bool task_handler(const task_t* task) {
+static bool task_handler(const task_t* task) {
     pb_istream_t stream = pb_istream_from_buffer(task->buffer, task->buffer_size);
     
     // In Protocol Buffers, each field is prefixed with a tag that contains two pieces of information:
@@ -165,7 +167,7 @@ void app_main(void)
     query.body.air_sensor.humidity = 0.5;
     query.body.air_sensor.temperature = 20;
     query.body.air_sensor.pressure = 1013.25;
-    memcpy(query.body.air_sensor.mac_addr, broadcast_mac, ESP_NOW_ETH_ALEN);
+    memcpy(query.body.air_sensor.mac_addr, BROADCAST_MAC_ADDR, ESP_NOW_ETH_ALEN);
 
     // Log the sensor query message
     ESP_LOGI(TAG, "Sensor query message created:");
