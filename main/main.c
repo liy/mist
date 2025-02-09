@@ -7,7 +7,6 @@
 #include <string.h>
 #include <esp_mac.h>
 #include <mqtt_client.h>
-#include <cJSON.h>
 
 #include "pb_encode.h"
 #include "pb_decode.h"
@@ -16,7 +15,6 @@
 #include "time_sync.h"
 #include <esp_now.h>
 #include "comm.h"
-#include "ap_provision.h"
 
 #define BROKER_URL "mqtt://192.168.3.105:1883"  // Replace with your broker URL
 
@@ -43,22 +41,11 @@ static void handle_sensor_query(const SensorQuery* query) {
             ESP_LOGI(TAG, "Received MIST_SENSOR query, timestamp: %lld, humidity: %f, temperature: %f", 
                      query->body.mist_sensor.timestamp, query->body.mist_sensor.humidity, query->body.mist_sensor.temperature);
 
-
-
-            // // Convert mist_sensor data to JSON
-            // cJSON *json = cJSON_CreateObject();
-            // cJSON_AddNumberToObject(json, "timestamp", query->body.mist_sensor.timestamp);
-            // cJSON_AddNumberToObject(json, "humidity", query->body.mist_sensor.humidity);
-            // cJSON_AddNumberToObject(json, "temperature", query->body.mist_sensor.temperature);
-            // char *json_str = cJSON_PrintUnformatted(json);
-
             char *sensor_data_str = malloc(200 * sizeof(char));
             snprintf(sensor_data_str, 200, "timestamp=%lld,humidity=%.2f,temperature=%.2f", 
                      query->body.mist_sensor.timestamp, 
                      query->body.mist_sensor.humidity, 
                      query->body.mist_sensor.temperature);
-
-            // ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
             
             // Publish JSON data to MQTT topic
             int msg_id = esp_mqtt_client_publish(client, "/esp32/sensor", sensor_data_str, 0, 0, 0);
@@ -74,16 +61,10 @@ static void handle_sensor_query(const SensorQuery* query) {
             msg_id = esp_mqtt_client_publish(client, "/esp32/humidity", humidity_str, 0, 0, 0);
             ESP_LOGI(TAG, "Sent publish successful, msg_id=%d", msg_id);
 
-            // ESP_ERROR_CHECK(esp_wifi_set_mode(ESPNOW_WIFI_MODE));
-
 
             free(sensor_data_str);
             free(temperature_str);
             free(humidity_str);
-
-            // // Clean up JSON object
-            // cJSON_Delete(json);
-            // free(json_str);
 
             break;
             
@@ -315,40 +296,31 @@ void app_main(void)
     // Initialize NVS for wifi station mode
     nvs_init();
 
-    bool has = wl_has_provisioning();
+    wl_wifi_init();
 
-    ESP_LOGI(TAG, "Has provisioning: %d", has);
-
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    // // Init WiFi to station mode in order to sync time
-    // wl_wifi_init(wifi_ssid, wifi_password);
-    // free(wifi_ssid);
-    // free(wifi_password);
-
-    // // Sync time
-    // time_sync();
-    // // Initialize ESPNOW communication and add broadcast peer
-    // comm_init();
-    // comm_add_peer(COMM_BROADCAST_MAC_ADDR, false);
-    // comm_register_recv_msg_cb(recv_msg_cb);
+    // Sync time
+    time_sync();
+    // Initialize ESPNOW communication and add broadcast peer
+    comm_init();
+    comm_add_peer(COMM_BROADCAST_MAC_ADDR, false);
+    comm_register_recv_msg_cb(recv_msg_cb);
     
-    // // Print time information
-    // // Get current time
-    // time_t now;
-    // time(&now);
-    // struct tm timeinfo;
-    // localtime_r(&now, &timeinfo);
-    // ESP_LOGI(TAG, "Current time info:");
-    // ESP_LOGI(TAG, "Unix timestamp: %lld", (long long)now);
-    // ESP_LOGI(TAG, "UTC time:       %s", asctime(&timeinfo));
-    // ESP_LOGI(TAG, "Local time:     %s", ctime(&now));
+    // Print time information
+    // Get current time
+    time_t now;
+    time(&now);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    ESP_LOGI(TAG, "Current time info:");
+    ESP_LOGI(TAG, "Unix timestamp: %lld", (long long)now);
+    ESP_LOGI(TAG, "UTC time:       %s", asctime(&timeinfo));
+    ESP_LOGI(TAG, "Local time:     %s", ctime(&now));
 
-    // // Init MTQQ client to be ready to publish sensor data 
-    // init_mtqq();
+    // Init MTQQ client to be ready to publish sensor data 
+    init_mtqq();
 
-    // // Start broadcasting master MAC address and wait for slave to send its address to complete the handshake.
-    // start_slavery_handshake();
+    // Start broadcasting master MAC address and wait for slave to send its address to complete the handshake.
+    start_slavery_handshake();
 
     // Dummy main loop
     while (1) {
