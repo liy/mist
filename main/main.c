@@ -16,9 +16,7 @@
 #include "time_sync.h"
 #include <esp_now.h>
 #include "comm.h"
-
-#define WIFI_SSID      "lijilin_2.4G"
-#define WIFI_PASS      "lijilinlijilin"
+#include "ap_provision.h"
 
 #define BROKER_URL "mqtt://192.168.3.105:1883"  // Replace with your broker URL
 
@@ -267,31 +265,15 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 {
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
     esp_mqtt_event_handle_t event = event_data;
-    // esp_mqtt_client_handle_t client = event->client;
-    int msg_id;
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_publish(client, "/topic/qos1", "data_3", 0, 1, 0);
-        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
-
-        msg_id = esp_mqtt_client_subscribe(client, "/topic/qos0", 0);
-        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
-
-        msg_id = esp_mqtt_client_subscribe(client, "/topic/qos1", 1);
-        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
-
-        msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos1");
-        ESP_LOGI(TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
         break;
-
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
-        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         break;
     case MQTT_EVENT_UNSUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
@@ -311,7 +293,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         }
         break;
     default:
-        ESP_LOGI(TAG, "Other event id:%d", event->event_id);
+        ESP_LOGW(TAG, "Unknown event id:%d", event->event_id);
         break;
     }
 }
@@ -326,57 +308,47 @@ void init_mtqq() {
 
     // Connect to the broker
     esp_mqtt_client_start(client);
-
-    // Publish a message after connecting
-    esp_mqtt_client_publish(client, "/test/topic", "Hello from ESP32!", 0, 1, 0);
-
-    // Keep the program running to listen for incoming messages
-    while (1) {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
 }
 
 void app_main(void)
 {
     // Initialize NVS for wifi station mode
     nvs_init();
-    // Init WiFi to station mode in order to sync time
-    wl_wifi_sta_init(WIFI_SSID, WIFI_PASS);
-    // Sync time
-    time_sync();
-    // Deinit WiFi
-    // wl_wifi_shutdown();
-    // // Swith WiFi to ESPNOW mode
-    // wl_wifi_espnow_init();
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(ESPNOW_WIFI_MODE));
+    bool has = wl_has_provisioning();
 
-    // Initialize ESPNOW
-    comm_init();
-    comm_add_peer(COMM_BROADCAST_MAC_ADDR, false);
-    comm_register_recv_msg_cb(recv_msg_cb);
+    ESP_LOGI(TAG, "Has provisioning: %d", has);
 
-    // Get current time
-    time_t now;
-    time(&now);
-    struct tm timeinfo;
-    localtime_r(&now, &timeinfo);
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    // Print time information
-    ESP_LOGI(TAG, "Current time info:");
-    ESP_LOGI(TAG, "  Unix timestamp: %lld", (long long)now);
-    ESP_LOGI(TAG, "  UTC time:       %s", asctime(&timeinfo));
-    ESP_LOGI(TAG, "  Local time:     %s", ctime(&now));
+    // // Init WiFi to station mode in order to sync time
+    // wl_wifi_init(wifi_ssid, wifi_password);
+    // free(wifi_ssid);
+    // free(wifi_password);
 
-    // // Start the handshake process
-    start_slavery_handshake();
+    // // Sync time
+    // time_sync();
+    // // Initialize ESPNOW communication and add broadcast peer
+    // comm_init();
+    // comm_add_peer(COMM_BROADCAST_MAC_ADDR, false);
+    // comm_register_recv_msg_cb(recv_msg_cb);
+    
+    // // Print time information
+    // // Get current time
+    // time_t now;
+    // time(&now);
+    // struct tm timeinfo;
+    // localtime_r(&now, &timeinfo);
+    // ESP_LOGI(TAG, "Current time info:");
+    // ESP_LOGI(TAG, "Unix timestamp: %lld", (long long)now);
+    // ESP_LOGI(TAG, "UTC time:       %s", asctime(&timeinfo));
+    // ESP_LOGI(TAG, "Local time:     %s", ctime(&now));
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // // Init MTQQ client to be ready to publish sensor data 
+    // init_mtqq();
 
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-
-    init_mtqq();
+    // // Start broadcasting master MAC address and wait for slave to send its address to complete the handshake.
+    // start_slavery_handshake();
 
     // Dummy main loop
     while (1) {
