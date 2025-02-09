@@ -15,6 +15,7 @@
 #include "time_sync.h"
 #include <esp_now.h>
 #include "comm.h"
+#include "led.h"
 
 #define BROKER_URL "mqtt://192.168.3.105:1883"  // Replace with your broker URL
 
@@ -293,11 +294,14 @@ void init_mtqq() {
 
 void app_main(void)
 {
+    led_blink();
     // Initialize NVS for wifi station mode
     nvs_init();
 
+    led_wait();
     wl_wifi_init();
 
+    led_blink();
     // Sync time
     time_sync();
     // Initialize ESPNOW communication and add broadcast peer
@@ -321,6 +325,8 @@ void app_main(void)
 
     // Start broadcasting master MAC address and wait for slave to send its address to complete the handshake.
     start_slavery_handshake();
+
+    led_off();
 
     // Dummy main loop
     while (1) {

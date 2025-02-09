@@ -7,3 +7,6 @@
 [submodule "components/mist_comm"]
 	path = components/mist_comm
 	url = git@github.com:liy/mist_comm.git
+[submodule "components/sed"]
+	path = components/sed
+	url = git@github.com:liy/sed.git
