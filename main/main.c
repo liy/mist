@@ -62,7 +62,8 @@ static void handle_sensor_query(const SensorQuery* query) {
             msg_id = esp_mqtt_client_publish(client, "/esp32/humidity", humidity_str, 0, 0, 0);
             ESP_LOGI(TAG, "Sent publish successful, msg_id=%d", msg_id);
 
-
+            led_action();
+            
             free(sensor_data_str);
             free(temperature_str);
             free(humidity_str);
