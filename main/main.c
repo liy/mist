@@ -17,7 +17,7 @@
 #include "comm.h"
 #include "led.h"
 
-#define BROKER_URL "mqtt://192.168.3.105:1883"  // Replace with your broker URL
+#define BROKER_URL "mqtt://192.168.101.131:1883"  // Replace with your broker URL
 
 static const char *TAG = "Mist";
 
@@ -42,6 +42,8 @@ static void handle_sensor_query(const SensorQuery* query) {
             ESP_LOGI(TAG, "Received MIST_SENSOR query, timestamp: %lld, humidity: %f, temperature: %f", 
                      query->body.mist_sensor.timestamp, query->body.mist_sensor.humidity, query->body.mist_sensor.temperature);
 
+            led_action();
+
             char *sensor_data_str = malloc(200 * sizeof(char));
             snprintf(sensor_data_str, 200, "timestamp=%lld,humidity=%.2f,temperature=%.2f", 
                      query->body.mist_sensor.timestamp, 
@@ -62,8 +64,12 @@ static void handle_sensor_query(const SensorQuery* query) {
             msg_id = esp_mqtt_client_publish(client, "/esp32/humidity", humidity_str, 0, 0, 0);
             ESP_LOGI(TAG, "Sent publish successful, msg_id=%d", msg_id);
 
-            led_action();
-            
+            if(msg_id < 0) {
+                ESP_LOGE(TAG, "Failed to publish message");
+                led_fail();
+            }
+
+
             free(sensor_data_str);
             free(temperature_str);
             free(humidity_str);
