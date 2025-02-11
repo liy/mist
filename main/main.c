@@ -17,7 +17,7 @@
 #include "comm.h"
 #include "led.h"
 
-#define BROKER_URL "mqtt://192.168.101.131:1883"  // Replace with your broker URL
+#define BROKER_URL "mqtt://192.168.3.105:1883"  // Replace with your broker URL
 
 static const char *TAG = "Mist";
 
@@ -213,6 +213,7 @@ static esp_err_t recv_msg_cb(const CommTask_t* task) {
 void start_slavery_handshake() {
     // Store the handle of the current handshake task
     s_handshake_notify = xTaskGetCurrentTaskHandle();
+    ESP_LOGI(TAG, "Starting Handshake");
 
     // Get master's mac address
     uint8_t mac[6];
@@ -241,12 +242,13 @@ void start_slavery_handshake() {
     }
 
     for(uint i = 0; i < 60; i++) {
-        if(ulTaskNotifyTake(pdTRUE, 1000 / portTICK_PERIOD_MS) == 1) {
-            ESP_LOGI(TAG, "Exiting loop as signaled");
-            break;
-        }
         ESP_LOGI(TAG, "Broadcasting slavery handshake with master MAC address...");
         comm_broadcast(buffer, buffer_size);
+
+        if(ulTaskNotifyTake(pdTRUE, 1000 / portTICK_PERIOD_MS) == 1) {
+            ESP_LOGI(TAG, "Main: Exiting loop as signaled");
+            break;
+        }
     }
 }
 
@@ -288,15 +290,20 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 }
 
 void init_mtqq() {
+    ESP_LOGI(TAG, "Initializing MQTT client");
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = BROKER_URL,
+        .network.timeout_ms = 10000,
+        .network.reconnect_timeout_ms = 5000,
+        .session.keepalive = 60
     };
 
     client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-
     // Connect to the broker
     esp_mqtt_client_start(client);
+    
+    ESP_LOGI(TAG, "Initializing MQTT client");
 }
 
 void app_main(void)
@@ -311,23 +318,13 @@ void app_main(void)
     led_blink();
     // Sync time
     time_sync();
+
     // Initialize ESPNOW communication and add broadcast peer
     comm_init();
     comm_add_peer(COMM_BROADCAST_MAC_ADDR, false);
     comm_register_recv_msg_cb(recv_msg_cb);
     
-    // Print time information
-    // Get current time
-    time_t now;
-    time(&now);
-    struct tm timeinfo;
-    localtime_r(&now, &timeinfo);
-    ESP_LOGI(TAG, "Current time info:");
-    ESP_LOGI(TAG, "Unix timestamp: %lld", (long long)now);
-    ESP_LOGI(TAG, "UTC time:       %s", asctime(&timeinfo));
-    ESP_LOGI(TAG, "Local time:     %s", ctime(&now));
-
-    // Init MTQQ client to be ready to publish sensor data 
+    // Init MTQQ client to be ready to publish sensor data
     init_mtqq();
 
     // Start broadcasting master MAC address and wait for slave to send its address to complete the handshake.

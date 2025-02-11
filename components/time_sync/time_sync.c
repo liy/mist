@@ -19,4 +19,15 @@ void time_sync(void)
         ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
         vTaskDelay(2000 / portTICK_PERIOD_MS);
     }
+
+    // Print time information
+    // Get current time
+    time_t now;
+    time(&now);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    ESP_LOGI(TAG, "Current time info:");
+    ESP_LOGI(TAG, "Unix timestamp: %lld", (long long)now);
+    ESP_LOGI(TAG, "UTC time:       %s", asctime(&timeinfo));
+    ESP_LOGI(TAG, "Local time:     %s", ctime(&now));
 }
