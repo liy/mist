@@ -253,8 +253,6 @@ void app_main(void)
     // Initialize NVS for wifi station mode
     nvs_init();
 
-
-
     led_wait();
     wl_wifi_init();
 
