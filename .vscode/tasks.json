@@ -12,12 +12,12 @@
       "detail": "This task runs the proto_compile.sh script to compile .proto files."
     },
     {
-      "label": "credentials flash",
+      "label": "Flash nvs",
       "type": "shell",
       "command": "bash",
       "args": [
         "-c",
-        "source $HOME/esp/esp-idf/export.sh && python3 ${workspaceFolder}/scripts/flash_credentials.py"
+        "source $HOME/esp/esp-idf/export.sh && python3 ${workspaceFolder}/scripts/flash_nvs.py"
       ],
       "problemMatcher": [],
       "group": {
