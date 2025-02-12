@@ -46,3 +46,8 @@ components/*/cmake_install.cmake
 components/*/Makefile
 
 managed_components
+
+# Credentials related files
+.credentials
+# Temporary nvs csv file for building
+nvs.csv

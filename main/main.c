@@ -16,6 +16,7 @@
 #include <esp_now.h>
 #include "comm.h"
 #include "led.h"
+#include "nvs.h"
 
 #define BROKER_URL "mqtt://192.168.3.105:1883"  // Replace with your broker URL
 
@@ -311,6 +312,22 @@ void app_main(void)
     led_blink();
     // Initialize NVS for wifi station mode
     nvs_init();
+
+
+     // Buffers to hold the credentials
+    char *username = malloc(128 * sizeof(char));
+    char *password = malloc(128 * sizeof(char));
+    char *ca_cert = malloc(4096 * sizeof(char));
+ 
+     // Read the credentials
+    esp_err_t err = read_mqtt_credentials(username, 128, password, 128, ca_cert, 4096);
+    if (err == ESP_OK) {
+        printf("MQTT Username: %s\n", username);
+        printf("MQTT Password: %s\n", password);
+        printf("MQTT CA Cert: %s\n", ca_cert);
+    } else {
+        printf("Failed to read credentials from NVS\n");
+    }
 
     led_wait();
     wl_wifi_init();
