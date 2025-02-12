@@ -1,0 +1,6 @@
+key,type,encoding,value
+storage,namespace,,
+MQTT_BROKER_URI,data,string,""
+MQTT_USERNAME,data,string,"mist"
+MQTT_PASSWORD,data,string,""
+MQTT_CA_CERT,data,string,""

@@ -6,7 +6,6 @@
 #include <esp_wifi.h>
 #include <string.h>
 #include <esp_mac.h>
-#include <mqtt_client.h>
 
 #include "pb_encode.h"
 #include "pb_decode.h"
@@ -16,7 +15,7 @@
 #include <esp_now.h>
 #include "comm.h"
 #include "led.h"
-#include "nvs.h"
+#include "mqtt.h"
 
 #define BROKER_URL "mqtt://192.168.3.105:1883"  // Replace with your broker URL
 
@@ -24,8 +23,6 @@ static const char *TAG = "Mist";
 
 // Task handle to notify when slave has sent over its the address
 static TaskHandle_t s_handshake_notify = NULL;
-
-static esp_mqtt_client_handle_t client;
 
 void nvs_init() {
     // Initialize NVS
@@ -40,6 +37,8 @@ void nvs_init() {
 static void handle_sensor_query(const SensorQuery* query) {
     switch (query->sensor_type) {
         case SensorType_MIST_SENSOR:
+            esp_err_t err;
+
             ESP_LOGI(TAG, "Received MIST_SENSOR query, timestamp: %lld, humidity: %f, temperature: %f", 
                      query->body.mist_sensor.timestamp, query->body.mist_sensor.humidity, query->body.mist_sensor.temperature);
 
@@ -52,20 +51,15 @@ static void handle_sensor_query(const SensorQuery* query) {
                      query->body.mist_sensor.temperature);
             
             // Publish JSON data to MQTT topic
-            int msg_id = esp_mqtt_client_publish(client, "/esp32/sensor", sensor_data_str, 0, 0, 0);
-            ESP_LOGI(TAG, "Sent publish successful, msg_id=%d", msg_id);
-
+            err = mqtt_publish("/esp32/sensor", sensor_data_str);
             char* temperature_str = malloc(30 * sizeof(char));
             snprintf(temperature_str, 30, "%.2f", query->body.mist_sensor.temperature);
-            msg_id = esp_mqtt_client_publish(client, "/esp32/temperature", temperature_str, 0, 0, 0);
-            ESP_LOGI(TAG, "Sent publish successful, msg_id=%d", msg_id);
-
+            err = mqtt_publish("/esp32/temperature", temperature_str);
             char* humidity_str = malloc(30 * sizeof(char));
             snprintf(humidity_str, 30, "%.2f", query->body.mist_sensor.humidity);
-            msg_id = esp_mqtt_client_publish(client, "/esp32/humidity", humidity_str, 0, 0, 0);
-            ESP_LOGI(TAG, "Sent publish successful, msg_id=%d", msg_id);
+            err = mqtt_publish("/esp32/humidity", humidity_str);
 
-            if(msg_id < 0) {
+            if(err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to publish message");
                 led_fail();
             }
@@ -253,60 +247,6 @@ void start_slavery_handshake() {
     }
 }
 
-static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
-{
-    ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
-    esp_mqtt_event_handle_t event = event_data;
-    switch ((esp_mqtt_event_id_t)event_id) {
-    case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        break;
-    case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-        break;
-    case MQTT_EVENT_SUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_UNSUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_PUBLISHED:
-        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_DATA:
-        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
-        break;
-    case MQTT_EVENT_ERROR:
-        ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
-            ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
-        }
-        break;
-    default:
-        ESP_LOGW(TAG, "Unknown event id:%d", event->event_id);
-        break;
-    }
-}
-
-void init_mtqq() {
-    ESP_LOGI(TAG, "Initializing MQTT client");
-    esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = BROKER_URL,
-        .network.timeout_ms = 10000,
-        .network.reconnect_timeout_ms = 5000,
-        .session.keepalive = 60
-    };
-
-    client = esp_mqtt_client_init(&mqtt_cfg);
-    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-    // Connect to the broker
-    esp_mqtt_client_start(client);
-    
-    ESP_LOGI(TAG, "Initializing MQTT client");
-}
-
 void app_main(void)
 {
     led_blink();
@@ -314,20 +254,6 @@ void app_main(void)
     nvs_init();
 
 
-     // Buffers to hold the credentials
-    char *username = malloc(128 * sizeof(char));
-    char *password = malloc(128 * sizeof(char));
-    char *ca_cert = malloc(4096 * sizeof(char));
- 
-     // Read the credentials
-    esp_err_t err = read_mqtt_credentials(username, 128, password, 128, ca_cert, 4096);
-    if (err == ESP_OK) {
-        printf("MQTT Username: %s\n", username);
-        printf("MQTT Password: %s\n", password);
-        printf("MQTT CA Cert: %s\n", ca_cert);
-    } else {
-        printf("Failed to read credentials from NVS\n");
-    }
 
     led_wait();
     wl_wifi_init();
@@ -342,7 +268,7 @@ void app_main(void)
     comm_register_recv_msg_cb(recv_msg_cb);
     
     // Init MTQQ client to be ready to publish sensor data
-    init_mtqq();
+    init_mqtt();
 
     // Start broadcasting master MAC address and wait for slave to send its address to complete the handshake.
     start_slavery_handshake();

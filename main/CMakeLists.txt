@@ -10,8 +10,6 @@ idf_component_register(
         REQUIRES mist_messages mist_wireless time_sync mist_comm mqtt sed
 )
 
-# Create a NVS image from the contents of the `nvs_data` CSV file
-# that fits the partition named 'nvs'. FLASH_IN_PROJECT indicates that
-# the generated image should be flashed when the entire project is flashed to
-# the target with 'idf.py -p PORT flash'.
-nvs_create_partition_image(nvs ../nvs.csv FLASH_IN_PROJECT)
+# This line auto flash the nvs.csv file to the partition table, but it will override all the data in the partition table
+# Therefore it is commented out during development
+# nvs_create_partition_image(nvs ../nvs.csv FLASH_IN_PROJECT)

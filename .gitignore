@@ -47,7 +47,5 @@ components/*/Makefile
 
 managed_components
 
-# Credentials related files
-.credentials
-# Temporary nvs csv file for building
+# Contains credentials for the MQTT broker and other sensitive data
 nvs.csv

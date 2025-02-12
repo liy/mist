@@ -11,7 +11,6 @@
       },
       "detail": "This task runs the proto_compile.sh script to compile .proto files."
     },
-
     {
       "label": "credentials flash",
       "type": "shell",
@@ -33,6 +32,18 @@
         "showReuseMessage": true,
         "clear": true
       }
+    },
+
+    {
+      "label": "Erase Flash",
+      "type": "shell",
+      "command": "sh",
+      "args": [
+        "-c",
+        "source $HOME/esp/esp-idf/export.sh && esptool.py --port ${config:idf.port} erase_flash"
+      ],
+      "problemMatcher": [],
+      "detail": "This task erases the flash memory of the ESP device."
     }
   ]
 }
