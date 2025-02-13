@@ -3,12 +3,15 @@
 #include <nvs_flash.h>
 #include <esp_log.h>
 #include <mqtt_client.h>
+#include "mqtt.h"
 
 static const char *TAG = "mqtt";
 
 static esp_mqtt_client_handle_t s_client;
 
 static nvs_handle_t s_nvs_handle;
+
+static mqtt_recv_msg_handler_t s_recv_msg_handler;
 
 esp_err_t read_nvs_value(const char *key, char *value, size_t *length) {
     esp_err_t err;
@@ -62,35 +65,48 @@ static void event_handler(void *handler_args, esp_event_base_t base, int32_t eve
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
     esp_mqtt_event_handle_t event = event_data;
     switch ((esp_mqtt_event_id_t)event_id) {
-    case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        break;
-    case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-        break;
-    case MQTT_EVENT_SUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_UNSUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_PUBLISHED:
-        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_DATA:
-        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
-        break;
-    case MQTT_EVENT_ERROR:
-        ESP_LOGW(TAG, "MQTT_EVENT_ERROR");
-        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
-            ESP_LOGW(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
-        }
-        break;
-    default:
-        ESP_LOGW(TAG, "Unknown event id:%d", event->event_id);
-        break;
+        case MQTT_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+
+            esp_mqtt_client_subscribe_single(s_client, "/sensor_command", 0);
+
+            break;
+        case MQTT_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+            break;
+        case MQTT_EVENT_SUBSCRIBED:
+            ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
+            break;
+        case MQTT_EVENT_UNSUBSCRIBED:
+            ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
+            break;
+        case MQTT_EVENT_PUBLISHED:
+            ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+            break;
+        case MQTT_EVENT_DATA:
+            ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+            if(strncmp(event->topic, "/sensor_command", 13) == 0) {
+                ESP_LOGI(TAG, "Received sensor command");
+                if (s_recv_msg_handler != NULL) {
+                    s_recv_msg_handler(event->topic, (const unsigned char *)event->data, event->data_len);
+                } else {
+                    ESP_LOGW(TAG, "No message handler registered");
+                }
+            }
+            else {
+                printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+                printf("DATA=%.*s\r\n", event->data_len, event->data);
+            }
+            break;
+        case MQTT_EVENT_ERROR:
+            ESP_LOGW(TAG, "MQTT_EVENT_ERROR");
+            if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+                ESP_LOGW(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
+            }
+            break;
+        default:
+            ESP_LOGW(TAG, "Unknown event id:%d", event->event_id);
+            break;
     }
 }
 
@@ -140,4 +156,12 @@ esp_err_t mqtt_publish(const char *topic, const char *data) {
     int msg_id = esp_mqtt_client_publish(s_client, topic, data, 0, 0, 0);
     ESP_LOGI(TAG, "Sent publish successful, msg_id=%d", msg_id);
     return ESP_OK;
+}
+
+void mqtt_register_recv_msg_handler(mqtt_recv_msg_handler_t handler) {
+    s_recv_msg_handler = handler;
+}
+
+void mqtt_deregister_recv_msg_handler(void) {
+    s_recv_msg_handler = NULL;
 }

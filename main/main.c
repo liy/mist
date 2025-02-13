@@ -24,6 +24,8 @@ static const char *TAG = "Mist";
 // Task handle to notify when slave has sent over its the address
 static TaskHandle_t s_handshake_notify = NULL;
 
+static uint8_t s_mac[6];
+
 void nvs_init() {
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
@@ -64,7 +66,6 @@ static void handle_sensor_query(const SensorQuery* query) {
                 led_fail();
             }
 
-
             free(sensor_data_str);
             free(temperature_str);
             free(humidity_str);
@@ -87,15 +88,18 @@ static void handle_sensor_query(const SensorQuery* query) {
     }
 }
 
-static void handle_command(const Command* cmd) {
+static void handle_sensor_command(const SensorCommand* cmd) {
     ESP_LOGI(TAG, "Received command with ID: %lld", cmd->id);
     
     switch (cmd->which_body) {
-        case Command_sleep_cycle_tag:
+        case SensorCommand_sleep_cycle_tag:
             ESP_LOGI(TAG, "Sleep cycle command with duration: %lld", 
                      cmd->body.sleep_cycle.sleep_time);
             break;
-            
+        case SensorCommand_sample_rate_tag:
+            ESP_LOGI(TAG, "Sample rate command with rate: %lld", 
+                     cmd->body.sample_rate.rate);
+            break;
         default:
             ESP_LOGE(TAG, "Unknown command body type");
             break;
@@ -136,16 +140,6 @@ static esp_err_t recv_msg_cb(const CommTask_t* task) {
                 handle_sensor_query(&query);
             } else {
                 ESP_LOGE(TAG, "Failed to decode SensorQuery: %s", PB_GET_ERROR(&stream));
-                return ESP_FAIL;
-            }
-            break;
-        }
-        case MessageType_COMMAND: {
-            Command cmd = Command_init_default;
-            if (pb_decode(&stream, &Command_msg, &cmd)) {
-                handle_command(&cmd);
-            } else {
-                ESP_LOGE(TAG, "Failed to decode command: %s", PB_GET_ERROR(&stream));
                 return ESP_FAIL;
             }
             break;
@@ -205,6 +199,63 @@ static esp_err_t recv_msg_cb(const CommTask_t* task) {
     return ESP_OK;
 }
 
+static esp_err_t mqtt_recv_msg_handler(const char *topic, const uint8_t *buffer, int buffer_size) {
+    pb_istream_t stream = pb_istream_from_buffer(buffer, buffer_size);
+    
+    // In Protocol Buffers, each field is prefixed with a tag that contains two pieces of information:
+    //      1. The field number from your .proto file
+    //      2. The wire type (encoding type)
+    // It is encoded as the first byte, the tag: (field_number << 3) | wire_type
+    uint32_t tag;
+    if (!pb_decode_varint32(&stream, &tag)) {
+        ESP_LOGE(TAG, "Failed to decode message type");
+        return ESP_FAIL; 
+    }
+
+    // Decode the actual message type
+    MessageType message_type;
+    if (!pb_decode_varint32(&stream, (uint32_t*)&message_type)) {
+        return ESP_FAIL; 
+    }
+
+    ESP_LOGI(TAG, "Received message type: %d", message_type);
+
+    // In order to decode the message using the correct message type, we need to reset the stream. 
+    // Reset stream to beginning, by setting the bytes_left to the total buffer size 
+    stream.bytes_left = buffer_size;
+    // and setting pointer to the beginning of the buffer
+    stream.state = (void*)buffer;
+
+    switch (message_type) {
+        case MessageType_SENSOR_COMMAND: {
+            SensorCommand cmd = SensorCommand_init_default;
+            if (pb_decode(&stream, &SensorCommand_msg, &cmd)) {
+                if ((cmd.has_master_mac_addr  && memcmp(cmd.master_mac_addr, s_mac, ESP_NOW_ETH_ALEN) == 0) || COMM_IS_BROADCAST_ADDR(cmd.master_mac_addr)) {
+                    switch (cmd.which_body) {
+                        case SensorCommand_sample_rate_tag:
+                            ESP_LOGI(TAG, "Forward received sample rate command with rate: %lld", cmd.body.sample_rate.rate);  
+                            comm_send(buffer, buffer_size, cmd.sensor_mac_addr);
+                            break;
+                        default:
+                            ESP_LOGE(TAG, "Unknown command body type");
+                            break;
+                    }
+                }
+
+            } else {
+                ESP_LOGE(TAG, "Failed to decode command: %s", PB_GET_ERROR(&stream));
+                return ESP_FAIL;
+            }
+            break;
+        }
+        default:
+            ESP_LOGE(TAG, "Unknown message type: %d", message_type);
+            return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
 void start_slavery_handshake() {
     // Store the handle of the current handshake task
     s_handshake_notify = xTaskGetCurrentTaskHandle();
@@ -236,7 +287,7 @@ void start_slavery_handshake() {
         return;
     }
 
-    for(uint i = 0; i < 60; i++) {
+    for(uint i = 0; i < 5; i++) {
         ESP_LOGI(TAG, "Broadcasting slavery handshake with master MAC address...");
         comm_broadcast(buffer, buffer_size);
 
@@ -256,6 +307,13 @@ void app_main(void)
     led_wait();
     wl_wifi_init();
 
+    // Get device MAC address
+    esp_err_t ret = esp_wifi_get_mac(ESP_IF_WIFI_STA, s_mac);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get MAC address, error: %s", esp_err_to_name(ret));
+        return;
+    }
+
     led_blink();
     // Sync time
     time_sync();
@@ -267,6 +325,7 @@ void app_main(void)
     
     // Init MTQQ client to be ready to publish sensor data
     init_mqtt();
+    mqtt_register_recv_msg_handler(mqtt_recv_msg_handler);
 
     // Start broadcasting master MAC address and wait for slave to send its address to complete the handshake.
     start_slavery_handshake();
