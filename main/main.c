@@ -36,30 +36,34 @@ void nvs_init() {
     ESP_ERROR_CHECK(ret);
 }
 
-static void handle_sensor_query(const SensorQuery* query) {
-    switch (query->sensor_type) {
-        case SensorType_MIST_SENSOR:
+static void handle_sensor_data(const SensorData* sensor_data) {
+    switch (sensor_data->sensor_type) {
+        case SensorType_AIR_SENSOR:
             esp_err_t err;
 
-            ESP_LOGI(TAG, "Received MIST_SENSOR query, timestamp: %lld, humidity: %f, temperature: %f", 
-                     query->body.mist_sensor.timestamp, query->body.mist_sensor.humidity, query->body.mist_sensor.temperature);
+            ESP_LOGI(TAG, "Received MIST_SENSOR sensor_data, timestamp: %lld, humidity: %f, temperature: %f, voc_index: %d", 
+                     sensor_data->body.air_sensor.timestamp, sensor_data->body.air_sensor.humidity, sensor_data->body.air_sensor.temperature, sensor_data->body.air_sensor.voc_index);
 
             led_action();
 
             char *sensor_data_str = malloc(200 * sizeof(char));
-            snprintf(sensor_data_str, 200, "timestamp=%lld,humidity=%.2f,temperature=%.2f", 
-                     query->body.mist_sensor.timestamp, 
-                     query->body.mist_sensor.humidity, 
-                     query->body.mist_sensor.temperature);
+            snprintf(sensor_data_str, 200, "timestamp=%lld,humidity=%.2f,temperature=%.2f,voc_index=%ld", 
+                     sensor_data->body.air_sensor.timestamp, 
+                     sensor_data->body.air_sensor.humidity, 
+                     sensor_data->body.air_sensor.temperature, 
+                     sensor_data->body.air_sensor.voc_index);
             
             // Publish JSON data to MQTT topic
             err = mqtt_publish("/esp32/sensor", sensor_data_str);
             char* temperature_str = malloc(30 * sizeof(char));
-            snprintf(temperature_str, 30, "%.2f", query->body.mist_sensor.temperature);
+            snprintf(temperature_str, 30, "%.2f", sensor_data->body.air_sensor.temperature);
             err = mqtt_publish("/esp32/temperature", temperature_str);
             char* humidity_str = malloc(30 * sizeof(char));
-            snprintf(humidity_str, 30, "%.2f", query->body.mist_sensor.humidity);
+            snprintf(humidity_str, 30, "%.2f", sensor_data->body.air_sensor.humidity);
             err = mqtt_publish("/esp32/humidity", humidity_str);
+            char* voc_index_str = malloc(30 * sizeof(char));
+            snprintf(voc_index_str, 30, "%.2f", sensor_data->body.air_sensor.humidity);
+            err = mqtt_publish("/esp32/voc_index", voc_index_str);
 
             if(err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to publish message");
@@ -71,19 +75,17 @@ static void handle_sensor_query(const SensorQuery* query) {
             free(humidity_str);
 
             break;
-            
-        case SensorType_AIR_SENSOR:
-            ESP_LOGI(TAG, "Received AIR_SENSOR query, timestamp: %lld, humidity: %f, temperature: %f", 
-                     query->body.air_sensor.timestamp, query->body.air_sensor.humidity, query->body.air_sensor.temperature);
+        case SensorType_MIST_SENSOR:
+            ESP_LOGI(TAG, "Received MIST_SENSOR sensor_data, timestamp: %lld, humidity: %f, temperature: %f", 
+                     sensor_data->body.mist_sensor.timestamp, sensor_data->body.mist_sensor.humidity, sensor_data->body.mist_sensor.temperature);
             break;
-            
         case SensorType_LIGHT_SENSOR:
-            ESP_LOGI(TAG, "Received LIGHT_SENSOR query, timestamp: %lld, light intensity: %f", 
-                     query->body.light_sensor.timestamp, query->body.light_sensor.intensity);
+            ESP_LOGI(TAG, "Received LIGHT_SENSOR sensor_data, timestamp: %lld, light intensity: %f", 
+                     sensor_data->body.light_sensor.timestamp, sensor_data->body.light_sensor.intensity);
             break;
             
         default:
-            ESP_LOGE(TAG, "Unknown sensor type: %d", query->sensor_type);
+            ESP_LOGE(TAG, "Unknown sensor type: %d", sensor_data->sensor_type);
             break;
     }
 }
@@ -134,12 +136,12 @@ static esp_err_t recv_msg_cb(const CommTask_t* task) {
     stream.state = (void*)task->buffer;
 
     switch (message_type) {
-        case MessageType_SENSOR_QUERY: {
-            SensorQuery query = SensorQuery_init_default;
-            if (pb_decode(&stream, SensorQuery_fields, &query)) {
-                handle_sensor_query(&query);
+        case MessageType_SENSOR_DATA: {
+            SensorData sensor_data = SensorData_init_default;
+            if (pb_decode(&stream, SensorData_fields, &sensor_data)) {
+                handle_sensor_data(&sensor_data);
             } else {
-                ESP_LOGE(TAG, "Failed to decode SensorQuery: %s", PB_GET_ERROR(&stream));
+                ESP_LOGE(TAG, "Failed to decode SensorData: %s", PB_GET_ERROR(&stream));
                 return ESP_FAIL;
             }
             break;
