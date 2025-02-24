@@ -37,42 +37,54 @@ void nvs_init() {
 }
 
 static void handle_sensor_data(const SensorData* sensor_data) {
+    esp_err_t err;
+    
     switch (sensor_data->sensor_type) {
         case SensorType_AIR_SENSOR:
-            esp_err_t err;
 
-            ESP_LOGI(TAG, "Received MIST_SENSOR sensor_data, timestamp: %lld, humidity: %f, temperature: %f, voc_index: %d", 
+            ESP_LOGI(TAG, "Received AIR_SENSOR sensor_data, timestamp: %lld, humidity: %f, temperature: %f, voc_index: %d", 
                      sensor_data->body.air_sensor.timestamp, sensor_data->body.air_sensor.humidity, sensor_data->body.air_sensor.temperature, sensor_data->body.air_sensor.voc_index);
 
             led_action();
 
-            char *sensor_data_str = malloc(200 * sizeof(char));
-            snprintf(sensor_data_str, 200, "timestamp=%lld,humidity=%.2f,temperature=%.2f,voc_index=%ld", 
-                     sensor_data->body.air_sensor.timestamp, 
-                     sensor_data->body.air_sensor.humidity, 
-                     sensor_data->body.air_sensor.temperature, 
-                     sensor_data->body.air_sensor.voc_index);
             
             // Publish JSON data to MQTT topic
-            err = mqtt_publish("/esp32/sensor", sensor_data_str);
             char* temperature_str = malloc(30 * sizeof(char));
             snprintf(temperature_str, 30, "%.2f", sensor_data->body.air_sensor.temperature);
-            err = mqtt_publish("/esp32/temperature", temperature_str);
+            err = mqtt_publish("/esp32/air/temperature", temperature_str);
             char* humidity_str = malloc(30 * sizeof(char));
             snprintf(humidity_str, 30, "%.2f", sensor_data->body.air_sensor.humidity);
-            err = mqtt_publish("/esp32/humidity", humidity_str);
+            err = mqtt_publish("/esp32/air/humidity", humidity_str);
             char* voc_index_str = malloc(30 * sizeof(char));
             snprintf(voc_index_str, 30, "%.2f", sensor_data->body.air_sensor.humidity);
-            err = mqtt_publish("/esp32/voc_index", voc_index_str);
+            err = mqtt_publish("/esp32/air/voc_index", voc_index_str);
 
             if(err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to publish message");
                 led_fail();
             }
 
-            free(sensor_data_str);
             free(temperature_str);
             free(humidity_str);
+            free(voc_index_str);
+
+            break;
+        case SensorType_SOIL_SENSOR:
+
+            ESP_LOGI(TAG, "Received SOIL_SENSOR sensor_data, timestamp: %lld, moisture: %f", 
+                     sensor_data->body.soil_sensor.timestamp, sensor_data->body.soil_sensor.moisture);
+
+            led_action();
+            
+            char* moisture_str = malloc(30 * sizeof(char));
+            snprintf(moisture_str, 30, "%.2f", sensor_data->body.soil_sensor.moisture);
+            err = mqtt_publish("/esp32/soil/moisture", moisture_str);
+            free(moisture_str);
+
+            if(err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to publish message");
+                led_fail();
+            }
 
             break;
         case SensorType_MIST_SENSOR:
